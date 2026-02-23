@@ -1,6 +1,6 @@
 # 🤖 LervikMCP - UE5 MCP Server Plugin
 
-LervikMCP is an (experimental) MCP server plugin for Unreal Engine 5. It allows you to interface and work with the editor in new ways!
+LervikMCP is an MCP plugin for Unreal Engine 5. It allows you to interface and work with the editor in new ways! It's an experimental project exploring how LLMs can interact with the UE5 Editor.
 
 ## Tools (So far)
 
@@ -26,17 +26,27 @@ LervikMCP is an (experimental) MCP server plugin for Unreal Engine 5. It allows 
 
 **`trace`** — Control Unreal Insights tracing (start/stop/status) and analyze GPU profiling data from `.utrace` files.
 
-## Use cases
+## Examples - What can it do?
 
-The project aims to explore different ways to interface between UE5 and LLMs. Here are some uses cases I've found interesting so far!
+The project aims to explore different ways to interface between UE5 and LLMs. Here are some examples I've found interesting so far!
 
-### Blueprint to C++
+```
+What does this blueprint do?
+```
+![alt text](public/blueprint.png)
+---
 
-### Benchmark console variable changes
+```
+List the modified settings of the lights I've selected
+```
+![alt text](public/selected_lights.png)
+---
 
-### Debug blueprints/materials/++
-
-### Ask about things
+```
+Do a trace and give me a breakdown of the frametime (depth 2)
+```
+![alt text](public/trace.png)
+---
 
 ## Getting Started
 
