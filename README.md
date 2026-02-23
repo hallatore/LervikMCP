@@ -1,4 +1,4 @@
-# 🤖 LervikMCP - UE5 MCP Server Plugin
+# 🤖 LervikMCP - UE5 MCP Plugin
 
 LervikMCP is an MCP plugin for Unreal Engine 5. It allows you to interface and work with the editor in new ways! It's an experimental project exploring how LLMs can interact with the UE5 Editor.
 
@@ -73,11 +73,11 @@ Note: The server is always off by default. It only runs on localhost, but there 
 
 ### ⚠️Experimental warning
 
-The project aims to explore different ways to interface between UE5 and LLMs. This 
+The project aims to explore different ways to interface between UE5 and LLMs.
 
 The plugin enables tools to modify and delete things. There is always a risk that the LLM decides to run a delete/modify command on the wrong thing. Experiment with caution.
 
-The `execute_python` tool allows for a script interface between the LLM and UE5. This also allows for arbitrary python code execution.
+The `execute_python` tool allows for a script interface between the LLM and UE5. It has extra validation (`mcp.python.hardening`) to only execute safe code, but there is never a guarantee.
 
 ## Settings
 
@@ -94,3 +94,13 @@ Turns the MCP server ON or OFF
 - Options: any valid port
 
 Sets the port the MCP server should use.
+
+### mcp.python.hardening
+
+- Default: `2`
+- Options:
+    - `0` - None
+    - `1` - Medium
+    - `2` - High
+
+Safety measure that attempts to sandbox the `execute_python` tool.
