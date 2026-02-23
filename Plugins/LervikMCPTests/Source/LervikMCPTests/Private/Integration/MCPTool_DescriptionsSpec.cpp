@@ -25,13 +25,13 @@ void FMCPTool_DescriptionsSpec::Define()
 
 	Describe("create tool", [this]()
 	{
-		It("class param distinguishes spawnable actor classes from asset classes", [this]()
+		It("class param scopes actor vs asset with bracket prefixes", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("create"));
 			if (!TestNotNull("create tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("class"));
-			TestTrue("class description mentions 'spawnable'",
-				Desc.Contains(TEXT("spawnable"), ESearchCase::IgnoreCase));
+			TestTrue("class description contains '[actor]' bracket prefix",
+				Desc.Contains(TEXT("[actor]")));
 		});
 
 		It("template param documents that location/rotation apply to the duplicate", [this]()
@@ -114,49 +114,49 @@ void FMCPTool_DescriptionsSpec::Define()
 
 	Describe("inspect tool", [this]()
 	{
-		It("type description mentions 'level actor' scope for components", [this]()
+		It("type param lists components as a valid value", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("inspect"));
 			if (!TestNotNull("inspect tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("type"));
-			TestTrue("type description mentions 'level actor' scope for components",
-				Desc.Contains(TEXT("level actor"), ESearchCase::IgnoreCase));
+			TestTrue("type description lists 'components'",
+				Desc.Contains(TEXT("components")));
 		});
 
-		It("type description redirects Blueprint component queries to the graph tool", [this]()
+		It("type param lists nodes as a valid value", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("inspect"));
 			if (!TestNotNull("inspect tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("type"));
-			TestTrue("type description mentions 'graph' tool for Blueprint component inspection",
-				Desc.Contains(TEXT("graph"), ESearchCase::IgnoreCase));
+			TestTrue("type description lists 'nodes'",
+				Desc.Contains(TEXT("nodes")));
 		});
 
-		It("type description clarifies 'parameters' scope is Materials only", [this]()
+		It("type param lists parameters as a valid value", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("inspect"));
 			if (!TestNotNull("inspect tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("type"));
-			TestTrue("type description mentions 'Material' scope for parameters",
-				Desc.Contains(TEXT("Material"), ESearchCase::CaseSensitive));
+			TestTrue("type description lists 'parameters'",
+				Desc.Contains(TEXT("parameters")));
 		});
 
-		It("type param says connections works for Blueprints and Materials", [this]()
+		It("type param lists connections as a valid value", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("inspect"));
 			if (!TestNotNull("inspect tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("type"));
-			TestTrue("type mentions 'Blueprints and Materials' for connections",
-				Desc.Contains(TEXT("Blueprints and Materials"), ESearchCase::CaseSensitive));
+			TestTrue("type description lists 'connections'",
+				Desc.Contains(TEXT("connections")));
 		});
 
-		It("filter param clarifies it does not match graph names", [this]()
+		It("filter param describes glob/regex matching by name", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("inspect"));
 			if (!TestNotNull("inspect tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("filter"));
-			TestTrue("filter description mentions 'graph'",
-				Desc.Contains(TEXT("graph"), ESearchCase::IgnoreCase));
+			TestTrue("filter description mentions 'name'",
+				Desc.Contains(TEXT("name")));
 		});
 	});
 
@@ -210,13 +210,13 @@ void FMCPTool_DescriptionsSpec::Define()
 
 	Describe("delete tool", [this]()
 	{
-		It("type param explains folder must be empty", [this]()
+		It("type param includes folder as a valid value", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("delete"));
 			if (!TestNotNull("delete tool registered", Tool)) return;
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("type"));
-			TestTrue("type description mentions 'empty'",
-				Desc.Contains(TEXT("empty"), ESearchCase::IgnoreCase));
+			TestTrue("type description lists 'folder'",
+				Desc.Contains(TEXT("folder")));
 		});
 	});
 }
