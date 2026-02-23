@@ -2,6 +2,7 @@
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
 #include "MCPGraphHelpers.h"
+#include "MCPPythonValidator.h"
 
 #include "IPythonScriptPlugin.h"
 #include "ScopedTransaction.h"
@@ -16,9 +17,9 @@ FMCPToolInfo FMCPTool_ExecutePython::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("execute_python");
-    Info.Description = TEXT("Execute a Python script in the UE5 editor. The script is wrapped in a scoped undo transaction.");
+    Info.Description = TEXT("Execute Unreal Engine Python API commands to interact with the editor, assets, and world.");
     Info.Parameters  = {
-        { TEXT("code"),        TEXT("Python source code to execute. Must start with 'import unreal'"), TEXT("string"),  true },
+        { TEXT("code"),        TEXT("Unreal Engine Python script using the unreal module API"), TEXT("string"),  true },
         { TEXT("undoOnError"), TEXT("If true, undo the transaction when Python execution fails"), TEXT("boolean"), true },
     };
     return Info;
@@ -35,19 +36,11 @@ FMCPToolResult FMCPTool_ExecutePython::Execute(const TSharedPtr<FJsonObject>& Pa
             return FMCPToolResult::Error(TEXT("'code' is required"));
         }
 
-        FString Trimmed = Code.TrimStart();
-        static const FString RequiredPrefix = TEXT("import unreal");
-        if (!Trimmed.StartsWith(RequiredPrefix))
+        FString ValidationError;
+        if (!FMCPPythonValidator::Validate(Code, ValidationError))
         {
-            return FMCPToolResult::Error(TEXT("Python code must begin with 'import unreal'"));
-        }
-        if (Trimmed.Len() > RequiredPrefix.Len())
-        {
-            TCHAR NextChar = Trimmed[RequiredPrefix.Len()];
-            if (!FChar::IsWhitespace(NextChar) && NextChar != TEXT(';'))
-            {
-                return FMCPToolResult::Error(TEXT("Python code must begin with 'import unreal'"));
-            }
+            UE_LOG(LogTemp, Warning, TEXT("MCP Python validation failed: %s"), *ValidationError);
+            return FMCPToolResult::Error(TEXT("Failed to execute. This tool can only be used to run Unreal Engine Python scripts."));
         }
 
         // 2. Extract "undoOnError" (required)
