@@ -1,0 +1,26 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "LervikMCP",
+  "Category": "Editor",
+  "CreatedBy": "Lervik",
+  "Modules": [
+    {
+      "Name": "LervikMCP",
+      "Type": "DeveloperTool",
+      "LoadingPhase": "Default"
+    },
+    {
+      "Name": "LervikMCPEditor",
+      "Type": "Editor",
+      "LoadingPhase": "Default"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "PythonScriptPlugin",
+      "Enabled": true
+    }
+  ]
+}

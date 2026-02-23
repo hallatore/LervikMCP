@@ -1,0 +1,22 @@
+{
+  "FileVersion": 3,
+  "Version": 1,
+  "VersionName": "1.0",
+  "FriendlyName": "LervikMCPTests",
+  "Category": "Editor",
+  "CreatedBy": "Lervik",
+  "EnabledByDefault": false,
+  "Modules": [
+    {
+      "Name": "LervikMCPTests",
+      "Type": "Editor",
+      "LoadingPhase": "PostEngineInit"
+    }
+  ],
+  "Plugins": [
+    {
+      "Name": "LervikMCP",
+      "Enabled": true
+    }
+  ]
+}

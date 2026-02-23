@@ -1,0 +1,1141 @@
+#include "Misc/AutomationTest.h"
+#include "MCPToolDirectTestHelper.h"
+#include "Materials/MaterialExpressionScalarParameter.h"
+#include "Materials/MaterialExpressionMultiply.h"
+#include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionSine.h"
+#include "Materials/MaterialExpressionConstant3Vector.h"
+#include "EdGraph/EdGraph.h"
+#include "EdGraph/EdGraphNode.h"
+
+BEGIN_DEFINE_SPEC(FMCPTool_GraphDirectSpec, "Plugins.LervikMCP.Integration.Tools.Graph.Direct",
+	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
+	FMCPToolDirectTestHelper Helper;
+	IMCPTool* GraphTool = nullptr;
+END_DEFINE_SPEC(FMCPTool_GraphDirectSpec)
+
+void FMCPTool_GraphDirectSpec::Define()
+{
+	BeforeEach([this]()
+	{
+		Helper.Setup(this);
+		GraphTool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+	});
+
+	AfterEach([this]()
+	{
+		GraphTool = nullptr;
+		Helper.Cleanup();
+	});
+
+	Describe("tool availability", [this]()
+	{
+		It("graph tool is registered", [this]()
+		{
+			TestNotNull("graph tool found", GraphTool);
+		});
+	});
+
+	Describe("material add_node", [this]()
+	{
+		It("returns inputs and outputs arrays for Multiply expression", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMultiplyPins"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply","pos":[0,0]})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Inputs = nullptr;
+			const TArray<TSharedPtr<FJsonValue>>* Outputs = nullptr;
+			TestTrue("has inputs array", Json->TryGetArrayField(TEXT("inputs"), Inputs));
+			TestTrue("has outputs array", Json->TryGetArrayField(TEXT("outputs"), Outputs));
+
+			if (Inputs) TestEqual("Multiply has 2 inputs", Inputs->Num(), 2);
+			if (Outputs) TestTrue("Multiply has at least 1 output", Outputs->Num() >= 1);
+
+			if (Inputs && Inputs->Num() >= 2)
+			{
+				FString NameA, NameB;
+				(*Inputs)[0]->AsObject()->TryGetStringField(TEXT("name"), NameA);
+				(*Inputs)[1]->AsObject()->TryGetStringField(TEXT("name"), NameB);
+				TestEqual("first input is A", NameA, FString(TEXT("A")));
+				TestEqual("second input is B", NameB, FString(TEXT("B")));
+
+				FString Dir;
+				(*Inputs)[0]->AsObject()->TryGetStringField(TEXT("direction"), Dir);
+				TestEqual("input direction", Dir, FString(TEXT("input")));
+			}
+
+			if (Outputs && Outputs->Num() >= 1)
+			{
+				FString OutName;
+				(*Outputs)[0]->AsObject()->TryGetStringField(TEXT("name"), OutName);
+				TestEqual("first output name is empty string (unnamed default output)", OutName, FString(TEXT("")));
+			}
+		});
+	});
+
+	Describe("connect error reporting", [this]()
+	{
+		It("invalid source node GUID produces an errors array entry", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectErrors"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "BADGUID-0000-0000-0000-000000000000", "pin": "execute"},
+					"dest":   {"node": "BADGUID-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when all connections fail", Result.bIsError);
+			TestTrue("error text mentions source node",
+				Result.Content.Contains(TEXT("Source"), ESearchCase::IgnoreCase) ||
+				Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+		});
+	});
+
+	Describe("disconnect error reporting", [this]()
+	{
+		It("invalid source/dest node GUIDs produce an errors array entry", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestDisconnectErrors"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "BADGUID-0000-0000-0000-000000000000", "pin": "execute"},
+					"dest":   {"node": "BADGUID-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when all disconnections fail", Result.bIsError);
+			TestTrue("error text mentions node not found",
+				Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+		});
+	});
+
+	Describe("invalid action error message", [this]()
+	{
+		It("lists valid actions in the error message", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestInvalidAction"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"not_a_real_action","target":"%s"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is an error", Result.bIsError);
+
+			FString Content = Result.Content;
+			TestTrue("error lists 'add_node'", Content.Contains(TEXT("add_node")));
+			TestTrue("error lists 'connect'",  Content.Contains(TEXT("connect")));
+		});
+	});
+
+	Describe("material edit_node", [this]()
+	{
+		It("edits a material expression property", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeScalar"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionScalarParameter::StaticClass());
+			if (!TestNotNull("expression created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"ParameterName":"TestParam"}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Modified = nullptr;
+			TestTrue("has modified array", Json->TryGetArrayField(TEXT("modified"), Modified));
+			if (Modified && Modified->Num() >= 1)
+			{
+				FString FirstMod;
+				(*Modified)[0]->TryGetString(FirstMod);
+				TestEqual("modified contains expression GUID", FirstMod, GuidStr);
+			}
+		});
+
+		It("edits a material expression using node_id key (from add_node response)", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeById"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionScalarParameter::StaticClass());
+			if (!TestNotNull("expression created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node_id":"%s","properties":{"ParameterName":"ByIdParam"}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Modified = nullptr;
+			TestTrue("has modified array", Json->TryGetArrayField(TEXT("modified"), Modified));
+			if (Modified && Modified->Num() >= 1)
+			{
+				FString FirstMod;
+				(*Modified)[0]->TryGetString(FirstMod);
+				TestEqual("modified contains expression GUID", FirstMod, GuidStr);
+			}
+		});
+
+		It("edit_node with pos sets MaterialExpressionEditorX and Y", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodePos"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			if (!TestNotNull("expression created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos":[200,300]})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TestEqual("MaterialExpressionEditorX is 200", Expr->MaterialExpressionEditorX, 200);
+			TestEqual("MaterialExpressionEditorY is 300", Expr->MaterialExpressionEditorY, 300);
+		});
+
+		It("reports unknown expression property in warnings", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeUnknownProp"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionScalarParameter::StaticClass());
+			if (!TestNotNull("expression created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"NonExistentProp":"value"}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not a hard error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Warnings = nullptr;
+			TestTrue("response has warnings for unknown property",
+				Json->TryGetArrayField(TEXT("warnings"), Warnings));
+		});
+	});
+
+	Describe("connect happy path", [this]()
+	{
+		It("connects two material expression pins", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestConnectHappy"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid      = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"node": "%s", "pin": "A"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *MultiplyGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Connected = nullptr;
+			TestTrue("has connected array", Json->TryGetArrayField(TEXT("connected"), Connected));
+			if (Connected) TestEqual("connected has 1 entry", Connected->Num(), 1);
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("count is 1", Count, 1);
+		});
+
+		It("connects Constant3Vector to SubsurfaceColor material property", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestConnectSubsurfaceColor"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Vec = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionConstant3Vector::StaticClass(), 0, 0);
+			if (!TestNotNull("Constant3Vector expression", Vec)) return;
+
+			FString VecGuid = Vec->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"property": "SubsurfaceColor"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *VecGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Connected = nullptr;
+			TestTrue("has connected array", Json->TryGetArrayField(TEXT("connected"), Connected));
+			if (Connected) TestEqual("connected has 1 entry", Connected->Num(), 1);
+		});
+	});
+
+	Describe("disconnect happy path", [this]()
+	{
+		It("disconnects two material expression pins", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectHappy"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid      = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AssetPath    = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			// First connect them
+			TSharedPtr<FJsonObject> ConnParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"node": "%s", "pin": "A"}
+				})"),
+					*AssetPath, *MultiplyGuid, *AddGuid));
+			FMCPToolResult ConnResult = GraphTool->Execute(ConnParams);
+			TestFalse("connect setup succeeded", ConnResult.bIsError);
+
+			// Now disconnect
+			TSharedPtr<FJsonObject> DisconParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"node": "%s", "pin": "A"}
+				})"),
+					*AssetPath, *MultiplyGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(DisconParams);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Disconnected = nullptr;
+			TestTrue("has disconnected array", Json->TryGetArrayField(TEXT("disconnected"), Disconnected));
+			if (Disconnected) TestEqual("disconnected has 1 entry", Disconnected->Num(), 1);
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("count is 1", Count, 1);
+		});
+	});
+
+	Describe("blueprint add_node CallFunction", [this]()
+	{
+		It("CallFunction with FunctionName in properties creates node with pins", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestCallFunctionProps"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "add_node",
+					"target": "%s",
+					"graph": "EventGraph",
+					"node_class": "CallFunction",
+					"pos": [0, 0],
+					"properties": {"FunctionName": "PrintString", "FunctionOwner": "KismetSystemLibrary"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			FString Title;
+			Json->TryGetStringField(TEXT("name"), Title);
+			TestFalse("node title is not 'None'", Title.Equals(TEXT("None")));
+
+			const TArray<TSharedPtr<FJsonValue>>* Pins = nullptr;
+			TestTrue("node has pins array", Json->TryGetArrayField(TEXT("pins"), Pins));
+			if (Pins) TestTrue("node has at least one pin", Pins->Num() > 0);
+		});
+	});
+
+	Describe("blueprint add_node VariableGet", [this]()
+	{
+		It("VariableGet with VariableName in properties creates node with pins", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestVarGetProps"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add a variable first so the reference resolves
+			TSharedPtr<FJsonObject> AddVarParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_variable","target":"%s","name":"TestHealth","var_type":"float"})"),
+					*AssetPath));
+			FMCPToolResult VarResult = GraphTool->Execute(AddVarParams);
+			TestFalse("add_variable succeeded", VarResult.bIsError);
+
+			// Add VariableGet using properties sub-object
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "add_node",
+					"target": "%s",
+					"graph": "EventGraph",
+					"node_class": "VariableGet",
+					"pos": [0, 0],
+					"properties": {"VariableName": "TestHealth"}
+				})"),
+					*AssetPath));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			FString Title;
+			Json->TryGetStringField(TEXT("name"), Title);
+			TestFalse("node title is not 'None'", Title.Equals(TEXT("None")));
+
+			const TArray<TSharedPtr<FJsonValue>>* Pins = nullptr;
+			TestTrue("node has pins array", Json->TryGetArrayField(TEXT("pins"), Pins));
+			if (Pins) TestTrue("node has at least one pin", Pins->Num() > 0);
+		});
+	});
+
+	Describe("blueprint add_node SwitchOnInt hidden pins", [this]()
+	{
+		It("pins list excludes hidden internal pins (no NotEqual comparison pin)", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestSwitchOnIntHiddenPins"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "add_node",
+					"target": "%s",
+					"graph": "EventGraph",
+					"node_class": "SwitchOnInt",
+					"pos": [0, 0]
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			if (!TestFalse("add_node SwitchOnInt succeeded", Result.bIsError)) return;
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Pins = nullptr;
+			if (!TestTrue("node has pins array", Json->TryGetArrayField(TEXT("pins"), Pins))) return;
+			if (!Pins) return;
+
+			for (const TSharedPtr<FJsonValue>& PinVal : *Pins)
+			{
+				TSharedPtr<FJsonObject> PinObj = PinVal->AsObject();
+				if (!PinObj.IsValid()) continue;
+
+				FString PinName;
+				PinObj->TryGetStringField(TEXT("name"), PinName);
+				TestFalse(
+					FString::Printf(TEXT("hidden pin '%s' must not appear in pin list"), *PinName),
+					PinName.Contains(TEXT("NotEqual"), ESearchCase::IgnoreCase));
+			}
+		});
+	});
+
+	Describe("help action", [this]()
+	{
+		It("returns list of valid actions with descriptions", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				TEXT(R"({"action":"help"})"));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not an error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Actions = nullptr;
+			TestTrue("response has actions array", Json->TryGetArrayField(TEXT("actions"), Actions));
+			if (!Actions) return;
+
+			TestTrue("has at least 5 actions", Actions->Num() >= 5);
+
+			bool bFoundAddNode = false;
+			bool bFoundConnect = false;
+			for (const TSharedPtr<FJsonValue>& ActionVal : *Actions)
+			{
+				TSharedPtr<FJsonObject> ActionObj = ActionVal->AsObject();
+				if (!ActionObj.IsValid()) continue;
+
+				FString Name;
+				ActionObj->TryGetStringField(TEXT("name"), Name);
+				if (Name == TEXT("add_node")) bFoundAddNode = true;
+				if (Name == TEXT("connect"))  bFoundConnect = true;
+			}
+
+			TestTrue("contains add_node action", bFoundAddNode);
+			TestTrue("contains connect action",  bFoundConnect);
+		});
+	});
+
+	Describe("material edit_node numeric property", [this]()
+	{
+		It("edit_node with numeric ConstA sets Multiply expression float property", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeNumeric"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass());
+			if (!TestNotNull("Multiply expression created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Pass ConstA as a JSON number (not a string) — this triggers the coercion bug
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"ConstA":3.14}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			// Should report the expression as modified (modified count > 0)
+			const TArray<TSharedPtr<FJsonValue>>* Modified = nullptr;
+			TestTrue("has modified array", Json->TryGetArrayField(TEXT("modified"), Modified));
+			if (Modified)
+			{
+				TestTrue("modified count > 0", Modified->Num() > 0);
+			}
+
+			// Verify the property actually changed on the expression
+			UMaterialExpressionMultiply* Multiply = Cast<UMaterialExpressionMultiply>(Expr);
+			if (TestNotNull("cast to Multiply", Multiply))
+			{
+				TestTrue("ConstA was set to ~3.14", FMath::IsNearlyEqual(Multiply->ConstA, 3.14f, 0.001f));
+			}
+		});
+	});
+
+	Describe("blueprint add_variable var_name alias", [this]()
+	{
+		It("creates variable when var_name is used instead of name", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestVarNameAlias"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_variable","target":"%s","var_name":"MyAliasVar","var_type":"int"})"),
+					*AssetPath));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("one variable added", Count, 1);
+		});
+	});
+
+	Describe("error message quality - add_node Blueprint class on Material", [this]()
+	{
+		It("error mentions 'Material' and suggests valid expression names", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestAddNodeBPClassOnMat"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"PrintString","pos":[0,0]})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError for unknown class", Result.bIsError);
+
+			TestTrue("error mentions 'Material'", Result.Content.Contains(TEXT("Material")));
+			TestTrue("error suggests a valid expression name",
+				Result.Content.Contains(TEXT("Multiply")) ||
+				Result.Content.Contains(TEXT("Add"))      ||
+				Result.Content.Contains(TEXT("Constant")));
+		});
+	});
+
+	Describe("error message quality - add_node unknown class on Blueprint", [this]()
+	{
+		It("returns bIsError and error text mentions valid classes", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestAddNodeUnknownClass"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"NonExistentNodeClass","pos":[0,0]})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError for unknown class", Result.bIsError);
+			TestTrue("error mentions valid node classes",
+				Result.Content.Contains(TEXT("CallFunction")) ||
+				Result.Content.Contains(TEXT("Branch")));
+		});
+	});
+
+	Describe("error message quality - connect type mismatch reason", [this]()
+	{
+		It("error includes CanCreateConnection reason, not just node GUIDs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectTypeMismatch"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add first Branch node
+			TSharedPtr<FJsonObject> AddParams1 = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[0,0]})"),
+					*AssetPath));
+			FMCPToolResult AddResult1 = GraphTool->Execute(AddParams1);
+			if (!TestFalse("first Branch node added without error", AddResult1.bIsError)) return;
+
+			TSharedPtr<FJsonObject> AddJson1 = FMCPToolDirectTestHelper::ParseResultJson(AddResult1);
+			if (!TestNotNull("first add_node result parsed", AddJson1.Get())) return;
+
+			FString Node1Id;
+			AddJson1->TryGetStringField(TEXT("node_id"), Node1Id);
+			if (!TestFalse("first node_id is not empty", Node1Id.IsEmpty())) return;
+
+			// Add second Branch node
+			TSharedPtr<FJsonObject> AddParams2 = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[400,0]})"),
+					*AssetPath));
+			FMCPToolResult AddResult2 = GraphTool->Execute(AddParams2);
+			if (!TestFalse("second Branch node added without error", AddResult2.bIsError)) return;
+
+			TSharedPtr<FJsonObject> AddJson2 = FMCPToolDirectTestHelper::ParseResultJson(AddResult2);
+			if (!TestNotNull("second add_node result parsed", AddJson2.Get())) return;
+
+			FString Node2Id;
+			AddJson2->TryGetStringField(TEXT("node_id"), Node2Id);
+			if (!TestFalse("second node_id is not empty", Node2Id.IsEmpty())) return;
+
+			// Attempt incompatible connection: Exec "then" -> Bool "Condition"
+			TSharedPtr<FJsonObject> ConnParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": "then"},
+					"dest":   {"node": "%s", "pin": "Condition"}
+				})"),
+					*AssetPath, *Node1Id, *Node2Id));
+
+			FMCPToolResult ConnResult = GraphTool->Execute(ConnParams);
+			TestTrue("result is bIsError when connection fails", ConnResult.bIsError);
+			// Error text includes the CanCreateConnection reason
+			TestTrue("error contains reason beyond node identifiers",
+				ConnResult.Content.Contains(TEXT("(")) ||
+				ConnResult.Content.Contains(TEXT("type"), ESearchCase::IgnoreCase) ||
+				ConnResult.Content.Contains(TEXT("rejected"), ESearchCase::IgnoreCase));
+		});
+	});
+
+	Describe("edit_component component_name alias", [this]()
+	{
+		It("accepts component_name as alias for name", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestEditCompAlias"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add a component
+			TSharedPtr<FJsonObject> AddParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_component","target":"%s","component_class":"StaticMeshComponent","name":"TestMesh"})"),
+					*AssetPath));
+			FMCPToolResult AddResult = GraphTool->Execute(AddParams);
+			TestFalse("add_component succeeded", AddResult.bIsError);
+
+			// Edit using component_name alias
+			TSharedPtr<FJsonObject> EditParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "edit_component",
+					"target": "%s",
+					"component_name": "TestMesh",
+					"properties": {}
+				})"),
+					*AssetPath));
+
+			FMCPToolResult Result = GraphTool->Execute(EditParams);
+			TestFalse("edit_component with component_name alias is not an error", Result.bIsError);
+		});
+	});
+
+	Describe("connect all-fail is bIsError", [this]()
+	{
+		It("returns bIsError when all connections fail due to bad GUIDs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectAllFail"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "BADGUID00-0000-0000-0000-000000000000", "pin": "execute"},
+					"dest":   {"node": "BADGUID01-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when all connections fail", Result.bIsError);
+		});
+	});
+
+	Describe("disconnect all-fail is bIsError", [this]()
+	{
+		It("returns bIsError when all disconnections fail due to bad GUIDs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestDisconnectAllFail"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "BADGUID00-0000-0000-0000-000000000000", "pin": "execute"},
+					"dest":   {"node": "BADGUID01-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when all disconnections fail", Result.bIsError);
+		});
+	});
+
+	Describe("connect diagnostics", [this]()
+	{
+		It("bad output pin name reports available outputs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDiagBadOutputPin"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid      = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": "BADPIN"},
+					"dest":   {"node": "%s", "pin": "A"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *MultiplyGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError", Result.bIsError);
+			TestTrue("error mentions 'Output pin'", Result.Content.Contains(TEXT("Output pin"), ESearchCase::IgnoreCase));
+			TestTrue("error mentions 'not found'", Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+			TestTrue("error lists available outputs", Result.Content.Contains(TEXT("Available outputs"), ESearchCase::IgnoreCase));
+		});
+
+		It("bad input pin name reports available inputs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDiagBadInputPin"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid      = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"node": "%s", "pin": "BADPIN"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *MultiplyGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError", Result.bIsError);
+			TestTrue("error mentions 'Input pin'", Result.Content.Contains(TEXT("Input pin"), ESearchCase::IgnoreCase));
+			TestTrue("error mentions 'not found'", Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+			TestTrue("error lists available inputs", Result.Content.Contains(TEXT("Available inputs"), ESearchCase::IgnoreCase));
+			TestTrue("error names the 'A' input", Result.Content.Contains(TEXT("'A'"), ESearchCase::CaseSensitive));
+		});
+
+		It("bad output pin on property connect reports available outputs", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDiagBadOutputOnProp"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": "BADPIN"},
+					"dest":   {"property": "BaseColor"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *MultiplyGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError", Result.bIsError);
+			TestTrue("error mentions 'Output pin'", Result.Content.Contains(TEXT("Output pin"), ESearchCase::IgnoreCase));
+			TestTrue("error mentions 'not found'", Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+			TestTrue("error lists available outputs", Result.Content.Contains(TEXT("Available outputs"), ESearchCase::IgnoreCase));
+		});
+
+		It("Sine expression with empty source pin connects to another expression (regression)", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestSineEmptyPinExpr"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Sine = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionSine::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Sine expression", Sine)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString SineGuid = Sine->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid  = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"node": "%s", "pin": "A"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *SineGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("Sine->Add connection succeeds with empty source pin", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("count is 1", Count, 1);
+		});
+
+		It("Sine expression connects to material property with empty source pin (regression)", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestSineEmptyPinProp"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Sine = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionSine::StaticClass(), 0, 0);
+			if (!TestNotNull("Sine expression", Sine)) return;
+
+			FString SineGuid = Sine->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": ""},
+					"dest":   {"property": "EmissiveColor"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *SineGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("Sine->EmissiveColor connection succeeds with empty source pin", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("count is 1", Count, 1);
+		});
+	});
+
+	Describe("blueprint edit_node", [this]()
+	{
+		It("edit_node with pos sets NodePosX and NodePosY on a Blueprint node", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestBPEditNodePos"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add a Branch node
+			TSharedPtr<FJsonObject> AddParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[0,0]})"),
+					*AssetPath));
+			FMCPToolResult AddResult = GraphTool->Execute(AddParams);
+			if (!TestFalse("add_node Branch succeeded", AddResult.bIsError)) return;
+
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add_node result parsed", AddJson.Get())) return;
+
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id is not empty", NodeId.IsEmpty())) return;
+
+			// Call edit_node with pos
+			TSharedPtr<FJsonObject> EditParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos":[500,600]})"),
+					*AssetPath, *NodeId));
+
+			FMCPToolResult Result = GraphTool->Execute(EditParams);
+			TestFalse("result is not error", Result.bIsError);
+
+			// Find the node in BP graphs and verify position
+			FGuid TargetGuid;
+			FGuid::Parse(NodeId, TargetGuid);
+			UEdGraphNode* FoundNode = nullptr;
+			TArray<UEdGraph*> AllGraphs;
+			BP->GetAllGraphs(AllGraphs);
+			for (UEdGraph* Graph : AllGraphs)
+			{
+				for (UEdGraphNode* Node : Graph->Nodes)
+				{
+					if (Node && Node->NodeGuid == TargetGuid)
+					{
+						FoundNode = Node;
+						break;
+					}
+				}
+				if (FoundNode) break;
+			}
+
+			if (TestNotNull("found the edited node", FoundNode))
+			{
+				TestEqual("NodePosX is 500", FoundNode->NodePosX, 500);
+				TestEqual("NodePosY is 600", FoundNode->NodePosY, 600);
+			}
+		});
+	});
+
+	Describe("add_node missing pos validation", [this]()
+	{
+		It("Blueprint add_node without pos returns error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestAddNodeNoPosBP"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when pos is missing", Result.bIsError);
+			TestTrue("error mentions pos", Result.Content.Contains(TEXT("pos"), ESearchCase::IgnoreCase));
+		});
+
+		It("Material add_node without pos returns error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestAddNodeNoPosMat"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is bIsError when pos is missing", Result.bIsError);
+			TestTrue("error mentions pos", Result.Content.Contains(TEXT("pos"), ESearchCase::IgnoreCase));
+		});
+
+		It("Batch add_node with one missing pos only fails that node", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestAddNodeBatchPartialPos"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "add_node",
+					"target": "%s",
+					"nodes": [
+						{"node_class": "Multiply", "pos": [0, 0]},
+						{"node_class": "Add"}
+					]
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("batch result is not a hard error (partial success)", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Nodes = nullptr;
+			TestTrue("has nodes array", Json->TryGetArrayField(TEXT("nodes"), Nodes));
+			if (Nodes)
+			{
+				TestEqual("nodes array has 2 entries", Nodes->Num(), 2);
+				// Second entry should be an error
+				if (Nodes->Num() >= 2)
+				{
+					TSharedPtr<FJsonObject> SecondNode = (*Nodes)[1]->AsObject();
+					TestTrue("second node has error field", SecondNode.IsValid() && SecondNode->HasField(TEXT("error")));
+				}
+			}
+		});
+	});
+}
