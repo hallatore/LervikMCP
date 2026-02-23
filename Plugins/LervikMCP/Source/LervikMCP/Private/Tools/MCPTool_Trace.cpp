@@ -32,14 +32,14 @@ FMCPToolInfo FMCPTool_Trace::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("trace");
-    Info.Description = TEXT("Control Unreal Insights tracing and analyze GPU profiling data from .utrace files. test runs (start → 5s sleep → stop)");
+    Info.Description = TEXT("Control Unreal Insights tracing and analyze GPU data from .utrace files");
     Info.Parameters  = {
-        { TEXT("action"),   TEXT("'start', 'stop', 'status', 'analyze', or 'test'"),                      TEXT("string"), true  },
-        { TEXT("channels"), TEXT("Trace channels comma-separated. Default: cpu,gpu,frame,bookmark"),      TEXT("string"), false },
-        { TEXT("path"),     TEXT("Path to .utrace file. Required for 'analyze'; optional output path for 'start'"), TEXT("string"), false },
-        { TEXT("depth"),    TEXT("GPU tree depth levels. Default: 1"),                                     TEXT("string"), false },
-        { TEXT("min_ms"),   TEXT("Min avg ms threshold. Default: 0.1"),                                    TEXT("string"), false },
-        { TEXT("filter"),      TEXT("Case-insensitive substring filter on GPU node names. Overrides depth limit. Returns full ancestor chain for matches."), TEXT("string"), false },
+        { TEXT("action"),   TEXT("Values: start|stop|status|analyze|test"),                                TEXT("string"),  true  },
+        { TEXT("channels"), TEXT("[start|test] Trace channels comma-separated. Default: cpu,gpu,frame,bookmark"), TEXT("string"), false },
+        { TEXT("path"),     TEXT("[analyze] Required .utrace file path. [start] Optional output path"),   TEXT("string"),  false },
+        { TEXT("depth"),    TEXT("[analyze] GPU tree depth levels. Default: 1"),                           TEXT("integer"), false },
+        { TEXT("min_ms"),   TEXT("[analyze] Min avg ms filter threshold. Default: 0.1"),                  TEXT("number"),  false },
+        { TEXT("filter"),   TEXT("[analyze] Case-insensitive substring filter on GPU node names. Overrides depth limit"), TEXT("string"), false },
     };
     return Info;
 }
@@ -59,11 +59,26 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
 
         int32 DepthLimit = 1;
         double MinMsThreshold = 0.1;
-        FString DepthStr, MinMsStr;
-        if (Params->TryGetStringField(TEXT("depth"), DepthStr))
-            DepthLimit = FMath::Max(0, FCString::Atoi(*DepthStr));
-        if (Params->TryGetStringField(TEXT("min_ms"), MinMsStr))
-            MinMsThreshold = FMath::Max(0.0, FCString::Atof(*MinMsStr));
+
+        double DepthD;
+        if (Params->TryGetNumberField(TEXT("depth"), DepthD))
+            DepthLimit = FMath::Max(0, FMath::FloorToInt(DepthD));
+        else
+        {
+            FString DepthStr;
+            if (Params->TryGetStringField(TEXT("depth"), DepthStr))
+                DepthLimit = FMath::Max(0, FCString::Atoi(*DepthStr));
+        }
+
+        double MinMsD;
+        if (Params->TryGetNumberField(TEXT("min_ms"), MinMsD))
+            MinMsThreshold = FMath::Max(0.0, MinMsD);
+        else
+        {
+            FString MinMsStr;
+            if (Params->TryGetStringField(TEXT("min_ms"), MinMsStr))
+                MinMsThreshold = FMath::Max(0.0, FCString::Atof(*MinMsStr));
+        }
 
         FString Filter;
         Params->TryGetStringField(TEXT("filter"), Filter);

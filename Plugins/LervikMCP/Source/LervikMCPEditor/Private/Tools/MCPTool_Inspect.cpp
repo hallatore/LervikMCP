@@ -169,10 +169,10 @@ FMCPToolInfo FMCPTool_Inspect::GetToolInfo() const
     Info.Description = TEXT("Inspect properties, components, nodes, variables, functions, pins, or parameters of an asset or actor");
     Info.Parameters = {
         { TEXT("target"), TEXT("Object path, actor label, 'selected', or 'AssetPath::NodeGUID' for pins"), TEXT("string"), true  },
-        { TEXT("type"),   TEXT("'properties' (default), 'components' (level actors and Blueprints; use graph tool to add/edit BP components), 'nodes', 'expressions', 'variables', 'functions', 'pins', 'parameters' (Material only), 'connections' (Blueprints and Materials)"), TEXT("string"), false },
-        { TEXT("filter"), TEXT("Glob/regex to filter results by name or class (does not filter by graph name)"), TEXT("string"), false },
-        { TEXT("depth"),  TEXT("Property traversal depth (default: 1, currently informational)"),          TEXT("integer"), false },
-        { TEXT("detail"), TEXT("Property detail level: 'all' or 'skip_defaults' (default: skip_defaults). When skip_defaults, omits properties with default/empty values."), TEXT("string"), false },
+        { TEXT("type"),   TEXT("Values: properties|components|nodes|expressions|variables|functions|pins|parameters|connections. Default: properties"), TEXT("string"), false },
+        { TEXT("filter"), TEXT("Glob/regex to filter results by name"), TEXT("string"), false },
+        { TEXT("depth"),  TEXT("Property traversal depth. Default: 1"),          TEXT("integer"), false },
+        { TEXT("detail"), TEXT("Values: all|skip_defaults. Default: skip_defaults. skip_defaults omits properties with default/empty values"), TEXT("string"), false },
     };
     return Info;
 }

@@ -10,6 +10,7 @@
 #include "IContentBrowserSingleton.h"
 #include "AssetRegistry/AssetData.h"
 #include "Editor.h"
+#include "LevelEditorViewport.h"
 #include "GameFramework/Actor.h"
 
 #include "Dom/JsonObject.h"
@@ -48,10 +49,10 @@ FMCPToolInfo FMCPTool_Editor::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("editor");
-    Info.Description = TEXT("Editor state management: open, close, select, deselect, focus, save, or navigate assets and actors");
+    Info.Description = TEXT("Editor state management: open, close, select, deselect, focus, save, navigate assets/actors, or get_viewport_info");
     Info.Parameters  = {
-        { TEXT("action"), TEXT("'open'/'close'/'save' (assets), 'select'/'deselect'/'focus' (level actors), 'navigate' (syncs Content Browser to asset path)"),          TEXT("string"),       true  },
-        { TEXT("target"), TEXT("Asset path(s) or actor label(s). Pass as array for multiple targets. For 'deselect' with no target, deselects all."), TEXT("string|array"), false, TEXT("string") },
+        { TEXT("action"), TEXT("Values: open|close|save|select|deselect|focus|navigate|get_viewport_info. open/close/save operate on assets. select/deselect/focus operate on level actors. navigate syncs Content Browser. get_viewport_info returns viewport/camera/PIE state"), TEXT("string"),       true  },
+        { TEXT("target"), TEXT("Asset path(s) or actor label(s). String or array. deselect with no target deselects all"), TEXT("string|array"), false, TEXT("string") },
     };
     return Info;
 }
@@ -296,8 +297,104 @@ FMCPToolResult FMCPTool_Editor::Execute(const TSharedPtr<FJsonObject>& Params)
             return FMCPJsonHelpers::SuccessResponse(Result);
         }
 
+        // ── get_viewport_info ────────────────────────────────────────────
+        if (Action.Equals(TEXT("get_viewport_info"), ESearchCase::IgnoreCase))
+        {
+            TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+            Result->SetStringField(TEXT("action"), TEXT("get_viewport_info"));
+
+            // PIE status
+            TSharedPtr<FJsonObject> PieObj = MakeShared<FJsonObject>();
+            const bool bPlaying = GEditor->IsPlaySessionInProgress();
+            const bool bSimulating = GEditor->IsSimulatingInEditor();
+            PieObj->SetBoolField(TEXT("active"), bPlaying);
+            PieObj->SetStringField(TEXT("mode"), bSimulating ? TEXT("SIE") : (bPlaying ? TEXT("PIE") : TEXT("none")));
+            Result->SetObjectField(TEXT("pie"), PieObj);
+
+            // Viewports
+            TArray<TSharedPtr<FJsonValue>> ViewportArray;
+            const TArray<FLevelEditorViewportClient*>& Clients = GEditor->GetLevelViewportClients();
+
+            for (int32 i = 0; i < Clients.Num(); ++i)
+            {
+                FLevelEditorViewportClient* Client = Clients[i];
+                if (!Client)
+                {
+                    continue;
+                }
+
+                TSharedPtr<FJsonObject> VpObj = MakeShared<FJsonObject>();
+                VpObj->SetNumberField(TEXT("index"), i);
+                VpObj->SetBoolField(TEXT("active"), Client == GCurrentLevelEditingViewportClient);
+
+                // Viewport type
+                const ELevelViewportType VpType = Client->GetViewportType();
+                const bool bPerspective = Client->IsPerspective();
+                const TCHAR* TypeStr = TEXT("unknown");
+                switch (VpType)
+                {
+                case LVT_Perspective:      TypeStr = TEXT("perspective"); break;
+                case LVT_OrthoXY:          TypeStr = TEXT("top"); break;
+                case LVT_OrthoXZ:          TypeStr = TEXT("front"); break;
+                case LVT_OrthoYZ:          TypeStr = TEXT("left"); break;
+                case LVT_OrthoNegativeXY:  TypeStr = TEXT("bottom"); break;
+                case LVT_OrthoNegativeXZ:  TypeStr = TEXT("back"); break;
+                case LVT_OrthoNegativeYZ:  TypeStr = TEXT("right"); break;
+                case LVT_OrthoFreelook:    TypeStr = TEXT("ortho_freelook"); break;
+                default: break;
+                }
+                VpObj->SetStringField(TEXT("type"), TypeStr);
+                VpObj->SetBoolField(TEXT("is_perspective"), bPerspective);
+                VpObj->SetBoolField(TEXT("realtime"), Client->IsRealtime());
+
+                // FOV (perspective only)
+                if (bPerspective)
+                {
+                    VpObj->SetField(TEXT("fov"), FMCPJsonHelpers::RoundedJsonNumber(Client->ViewFOV, 1));
+                }
+
+                // Dimensions — skip zero-size (null Viewport or collapsed) viewports
+                int32 W = 0, H = 0;
+                if (Client->Viewport)
+                {
+                    const FIntPoint Size = Client->Viewport->GetSizeXY();
+                    W = Size.X;
+                    H = Size.Y;
+                }
+                if (W == 0 || H == 0)
+                {
+                    continue;
+                }
+                VpObj->SetNumberField(TEXT("width"), W);
+                VpObj->SetNumberField(TEXT("height"), H);
+
+                // Camera
+                TSharedPtr<FJsonObject> CamObj = MakeShared<FJsonObject>();
+                const FVector Loc = Client->GetViewLocation();
+                TSharedPtr<FJsonObject> LocObj = MakeShared<FJsonObject>();
+                LocObj->SetField(TEXT("x"), FMCPJsonHelpers::RoundedJsonNumber(Loc.X));
+                LocObj->SetField(TEXT("y"), FMCPJsonHelpers::RoundedJsonNumber(Loc.Y));
+                LocObj->SetField(TEXT("z"), FMCPJsonHelpers::RoundedJsonNumber(Loc.Z));
+                CamObj->SetObjectField(TEXT("location"), LocObj);
+
+                const FRotator Rot = Client->GetViewRotation();
+                TSharedPtr<FJsonObject> RotObj = MakeShared<FJsonObject>();
+                RotObj->SetField(TEXT("pitch"), FMCPJsonHelpers::RoundedJsonNumber(Rot.Pitch));
+                RotObj->SetField(TEXT("yaw"), FMCPJsonHelpers::RoundedJsonNumber(Rot.Yaw));
+                RotObj->SetField(TEXT("roll"), FMCPJsonHelpers::RoundedJsonNumber(Rot.Roll));
+                CamObj->SetObjectField(TEXT("rotation"), RotObj);
+
+                VpObj->SetObjectField(TEXT("camera"), CamObj);
+                ViewportArray.Add(MakeShared<FJsonValueObject>(VpObj));
+            }
+
+            Result->SetArrayField(TEXT("viewports"), ViewportArray);
+            Result->SetNumberField(TEXT("count"), ViewportArray.Num());
+            return FMCPJsonHelpers::SuccessResponse(Result);
+        }
+
         return FMCPToolResult::Error(FString::Printf(
-            TEXT("Unknown action: '%s'. Valid: open, close, select, deselect, focus, save, navigate"), *Action));
+            TEXT("Unknown action: '%s'. Valid: open, close, select, deselect, focus, save, navigate, get_viewport_info"), *Action));
     });
 }
 

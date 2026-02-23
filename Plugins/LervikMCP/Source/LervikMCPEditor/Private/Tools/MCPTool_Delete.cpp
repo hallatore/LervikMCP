@@ -63,12 +63,12 @@ FMCPToolInfo FMCPTool_Delete::GetToolInfo() const
     Info.Name        = TEXT("delete");
     Info.Description = TEXT("Delete assets, actors, or Blueprint/material elements in the UE5 editor");
     Info.Parameters  = {
-        { TEXT("type"),       TEXT("'asset', 'actor', 'node', 'variable', 'expression', 'component', 'connection', 'folder' (must be empty; delete contained assets first)"), TEXT("string"),       true  },
-        { TEXT("target"),     TEXT("Path, label, or GUID. Can be array for batch. Unused for type=connection."),            TEXT("string|array"), false, TEXT("string") },
-        { TEXT("parent"),     TEXT("Owning Blueprint or material path (required for node/variable/expression/component/connection)"), TEXT("string"), false },
-        { TEXT("graph"),      TEXT("Graph name for nodes (e.g. 'EventGraph'), currently informational"),                    TEXT("string"),       false },
-        { TEXT("pin_source"), TEXT("{ \"node\": \"GUID\", \"pin\": \"PinName\" } — output side of connection to break"),   TEXT("object"),       false },
-        { TEXT("pin_dest"),   TEXT("{ \"node\": \"GUID\", \"pin\": \"PinName\" } — input side of connection to break"),    TEXT("object"),       false },
+        { TEXT("type"),       TEXT("Values: asset|actor|node|variable|expression|component|connection|folder"),              TEXT("string"),       true  },
+        { TEXT("target"),     TEXT("Path, label, or GUID(s). String or array for batch. [connection] Not used"),            TEXT("string|array"), false, TEXT("string") },
+        { TEXT("parent"),     TEXT("[node|variable|expression|component|connection] Owning Blueprint or Material path"),   TEXT("string"), false },
+        { TEXT("graph"),      TEXT("[node] Graph name. Default: EventGraph"),                                              TEXT("string"),       false },
+        { TEXT("pin_source"), TEXT("[connection] Output pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"}"),              TEXT("object"),       false },
+        { TEXT("pin_dest"),   TEXT("[connection] Input pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"}"),               TEXT("object"),       false },
     };
     return Info;
 }

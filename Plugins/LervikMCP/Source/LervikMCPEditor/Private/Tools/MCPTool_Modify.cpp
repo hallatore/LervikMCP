@@ -23,8 +23,8 @@ FMCPToolInfo FMCPTool_Modify::GetToolInfo() const
     Info.Description = TEXT("Modify properties and/or transform of an actor or object in the UE5 editor");
     Info.Parameters  = {
         { TEXT("target"),     TEXT("Object path, actor label, 'selected', or 'ActorLabel.ComponentName' to target a specific component on a level actor"),  TEXT("string"), true  },
-        { TEXT("properties"), TEXT("Property names to values as {\"PropName\": value}. Use find type=property to discover valid names. Values in UE text import format"),  TEXT("object"), false },
-        { TEXT("transform"),  TEXT("Transform override: { \"location\": [x,y,z], \"rotation\": [pitch,yaw,roll], \"scale\": [x,y,z] }"), TEXT("object"), false },
+        { TEXT("properties"), TEXT("UProperty values via reflection. Format: {\"PropName\":value}. Use find(type='property',target='path') to discover valid names"),  TEXT("object"), false },
+        { TEXT("transform"),  TEXT("[actor] Transform override. Format: {\"location\":[x,y,z],\"rotation\":[p,y,r],\"scale\":[x,y,z]}. All fields optional"), TEXT("object"), false },
     };
     return Info;
 }

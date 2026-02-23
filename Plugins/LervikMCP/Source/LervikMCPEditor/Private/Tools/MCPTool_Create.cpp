@@ -26,18 +26,18 @@ FMCPToolInfo FMCPTool_Create::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("create");
-    Info.Description = TEXT("Create a new asset or spawn an actor in the UE5 editor");
+    Info.Description = TEXT("Create assets or spawn actors in the level");
     Info.Parameters  = {
-        { TEXT("type"),         TEXT("'asset' or 'actor'"),                                                                     TEXT("string"), true  },
-        { TEXT("class"),        TEXT("Actor class name (any spawnable class e.g. 'PointLight', 'CameraActor') or asset class: 'Blueprint', 'Material', 'MaterialInstanceConstant'"), TEXT("string"), false },
+        { TEXT("type"),         TEXT("Values: asset|actor"),                                                                    TEXT("string"), true  },
+        { TEXT("class"),        TEXT("[asset] Values: Blueprint|Material|MaterialInstanceConstant. Required when no template. [actor] Actor class e.g. PointLight, CameraActor"), TEXT("string"), false },
         { TEXT("name"),         TEXT("Asset name or actor label"),                                                              TEXT("string"), true  },
-        { TEXT("path"),         TEXT("Package path for assets: '/Game/Materials'"),                                             TEXT("string"), false },
-        { TEXT("parent_class"), TEXT("Parent class for Blueprint creation: 'Actor', 'Character', 'Pawn'"),                      TEXT("string"), false },
-        { TEXT("location"),     TEXT("Actor spawn location [x,y,z] or {\"x\":...,\"y\":...,\"z\":...}"),                             TEXT("array|object"),  false, TEXT("number") },
-        { TEXT("rotation"),     TEXT("Actor spawn rotation [pitch,yaw,roll] or {\"pitch\":...,\"yaw\":...,\"roll\":...}"),       TEXT("array|object"),  false, TEXT("number") },
-        { TEXT("template"),     TEXT("Source asset/actor path to duplicate from. For actors, location/rotation set absolute world transform on the duplicate"), TEXT("string"), false },
-        { TEXT("scale"),        TEXT("Actor spawn scale [x,y,z] or {\"x\":...,\"y\":...,\"z\":...}"),                             TEXT("array|object"),  false, TEXT("number") },
-        { TEXT("properties"),   TEXT("Property values {\"PropName\": value}. Supports nested component properties e.g. {\"StaticMeshComponent\": {\"StaticMesh\": \"/path\"}}"), TEXT("object"), false },
+        { TEXT("path"),         TEXT("[asset] Package path. Default: /Game. Example: /Game/Materials"),                         TEXT("string"), false },
+        { TEXT("parent_class"), TEXT("[asset] Parent class for Blueprint. Default: Actor. Values: Actor|Character|Pawn or any UClass name"), TEXT("string"), false },
+        { TEXT("location"),     TEXT("[actor] World position. Format: [x,y,z]"),                                                TEXT("array|object"),  false, TEXT("number") },
+        { TEXT("rotation"),     TEXT("[actor] World rotation. Format: [pitch,yaw,roll]"),                                       TEXT("array|object"),  false, TEXT("number") },
+        { TEXT("template"),     TEXT("Source asset/actor path to duplicate. [actor] location/rotation/scale override the duplicate's transform"), TEXT("string"), false },
+        { TEXT("scale"),        TEXT("[actor] World scale. Format: [x,y,z]"),                                                   TEXT("array|object"),  false, TEXT("number") },
+        { TEXT("properties"),   TEXT("UProperty values. Format: {\"PropName\":value}. Nested: {\"ComponentName\":{\"Prop\":value}}"), TEXT("object"), false },
     };
     return Info;
 }

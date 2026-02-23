@@ -47,16 +47,16 @@ FMCPToolInfo FMCPTool_Find::GetToolInfo() const
     Info.Name = TEXT("find");
     Info.Description = TEXT("Search for assets, actors, classes, properties, or the current selection in the UE5 editor");
     Info.Parameters = {
-        { TEXT("type"),      TEXT("What to search: 'asset', 'actor', 'class', 'property', 'selection'"), TEXT("string"),  true  },
-        { TEXT("class"),     TEXT("Class filter (wildcards supported)"),                                  TEXT("string"),  false },
-        { TEXT("path"),      TEXT("Path/folder filter (wildcards supported)"),                            TEXT("string"),  false },
-        { TEXT("name"),      TEXT("Name filter with wildcards"),                                          TEXT("string"),  false },
-        { TEXT("tag"),       TEXT("Asset registry tag filter: 'tag_name=value'"),                         TEXT("string"),  false },
-        { TEXT("parent"),    TEXT("(type=class) Parent class name for derived class search"),             TEXT("string"),  false },
-        { TEXT("target"),    TEXT("(type=property) Object to list UObject reflection properties. For Blueprint user variables, use inspect type=variables instead"), TEXT("string"),  false },
-        { TEXT("filter"),    TEXT("Post-filter glob/regex pattern applied to results"),                   TEXT("string"),  false },
-        { TEXT("recursive"), TEXT("Search recursively (default: true)"),                                  TEXT("boolean"), false },
-        { TEXT("limit"),     TEXT("Max number of results (default: 100)"),                                TEXT("integer"), false },
+        { TEXT("type"),      TEXT("Values: asset|actor|class|property|selection"),                                        TEXT("string"),  true  },
+        { TEXT("class"),     TEXT("[asset|actor] Class filter (wildcards supported)"),                                      TEXT("string"),  false },
+        { TEXT("path"),      TEXT("[asset] Path/folder filter (wildcards supported)"),                                     TEXT("string"),  false },
+        { TEXT("name"),      TEXT("Name filter (wildcards supported)"),                                                    TEXT("string"),  false },
+        { TEXT("tag"),       TEXT("[asset] Asset registry tag filter. Format: tag_name=value"),                             TEXT("string"),  false },
+        { TEXT("parent"),    TEXT("[class] Parent class name for derived class search"),                                   TEXT("string"),  false },
+        { TEXT("target"),    TEXT("[property] Object path to list UProperty names. For BP user variables use inspect type=variables"), TEXT("string"),  false },
+        { TEXT("filter"),    TEXT("Post-filter glob/regex on result names"),                                               TEXT("string"),  false },
+        { TEXT("recursive"), TEXT("[asset] Search recursively. Default: true"),                                            TEXT("boolean"), false },
+        { TEXT("limit"),     TEXT("Max results. Default: 100"),                                                            TEXT("integer"), false },
     };
     return Info;
 }

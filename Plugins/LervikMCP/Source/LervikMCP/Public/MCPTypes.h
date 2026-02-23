@@ -17,7 +17,7 @@ struct LERVIKMCP_API FMCPToolParameter
 {
     FName Name;
     FString Description;
-    FString Type; // JSON Schema type: "string", "number", "boolean", "object", "array"
+    FString Type; // JSON Schema type: "string", "integer", "number", "boolean", "object", "array"
     bool bRequired = false;
     FString ItemsType; // For array types: the "type" value for items schema (e.g. "string", "number", "object"). Empty = permissive {}.
 };

@@ -13,11 +13,11 @@ FMCPToolInfo FMCPTool_Execute::GetToolInfo() const
     Info.Name        = TEXT("execute");
     Info.Description = TEXT("Get, set, or list console variables (CVars)");
     Info.Parameters  = {
-        { TEXT("action"),      TEXT("'get_cvar', 'set_cvar', or 'list_cvars'"),                               TEXT("string"),  true  },
-        { TEXT("name"),        TEXT("(get_cvar/set_cvar) Console variable name"),                              TEXT("string"),  false },
-        { TEXT("value"),       TEXT("(set_cvar) Value to set on the console variable"),                        TEXT("string"),  false },
-        { TEXT("filter"),      TEXT("(list_cvars) Prefix or wildcard filter for variable names"),              TEXT("string"),  false },
-        { TEXT("includeHelp"), TEXT("(list_cvars) Include help text and type in output (default: false)"),     TEXT("boolean"), false },
+        { TEXT("action"),      TEXT("Values: get_cvar|set_cvar|list_cvars. Editor module adds: command"),     TEXT("string"),  true  },
+        { TEXT("name"),        TEXT("[get_cvar|set_cvar] Console variable name"),                              TEXT("string"),  false },
+        { TEXT("value"),       TEXT("[set_cvar] Value to set"),                                                TEXT("string"),  false },
+        { TEXT("filter"),      TEXT("[list_cvars] Prefix or wildcard filter for variable names"),              TEXT("string"),  false },
+        { TEXT("includeHelp"), TEXT("[list_cvars] Include help text and type. Default: false"),                TEXT("boolean"), false },
     };
     return Info;
 }
