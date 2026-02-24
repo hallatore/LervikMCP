@@ -1,6 +1,28 @@
-# 🤖 LervikMCP - UE5 MCP Plugin
+# LervikMCP - UE5 MCP Plugin
 
 LervikMCP is an MCP plugin for Unreal Engine 5. It allows you to interface and work with the editor in new ways! It's an experimental project exploring how LLMs can interact with the UE5 Editor.
+
+## Examples - What can it do?
+
+The project aims to explore different ways to interface between UE5 and LLMs. Here are some examples I've found interesting so far!
+
+```
+What does this blueprint do?
+```
+![alt text](public/blueprint.png)
+---
+
+```
+List the modified settings of the lights I've selected
+```
+![alt text](public/selected_lights.png)
+---
+
+```
+Do a trace and give me a breakdown of the frametime (depth 2)
+```
+![alt text](public/trace.png)
+---
 
 ## Tools (So far)
 
@@ -25,28 +47,6 @@ LervikMCP is an MCP plugin for Unreal Engine 5. It allows you to interface and w
 **`execute_python`** — Run arbitrary Python code in the editor via the Unreal Python API, wrapped in an undo transaction.
 
 **`trace`** — Control Unreal Insights tracing (start/stop/status) and analyze GPU profiling data from `.utrace` files.
-
-## Examples - What can it do?
-
-The project aims to explore different ways to interface between UE5 and LLMs. Here are some examples I've found interesting so far!
-
-```
-What does this blueprint do?
-```
-![alt text](public/blueprint.png)
----
-
-```
-List the modified settings of the lights I've selected
-```
-![alt text](public/selected_lights.png)
----
-
-```
-Do a trace and give me a breakdown of the frametime (depth 2)
-```
-![alt text](public/trace.png)
----
 
 ## Getting Started
 
