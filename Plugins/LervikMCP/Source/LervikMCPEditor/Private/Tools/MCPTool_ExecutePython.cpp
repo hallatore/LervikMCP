@@ -3,6 +3,7 @@
 #include "MCPJsonHelpers.h"
 #include "MCPGraphHelpers.h"
 #include "MCPPythonValidator.h"
+#include "MCPToolHelp.h"
 
 #include "IPythonScriptPlugin.h"
 #include "ScopedTransaction.h"
@@ -13,6 +14,22 @@
 
 #define LOCTEXT_NAMESPACE "LervikMCP"
 
+namespace
+{
+    static const FMCPParamHelp sExecPythonParams[] = {
+        { TEXT("code"),        TEXT("string"),  true,  TEXT("Unreal Engine Python script using the unreal module API"), nullptr, TEXT("import unreal; print(unreal.EditorAssetLibrary.list_assets('/Game/'))") },
+        { TEXT("undoOnError"), TEXT("boolean"), true,  TEXT("If true, undo the transaction when Python execution fails"), TEXT("true, false"), TEXT("true") },
+    };
+
+    static const FMCPToolHelpData sExecPythonHelp = {
+        TEXT("execute_python"),
+        TEXT("Execute Unreal Engine Python API commands to interact with the editor, assets, and world."),
+        TEXT(""),
+        nullptr, 0,
+        sExecPythonParams, UE_ARRAY_COUNT(sExecPythonParams)
+    };
+}
+
 FMCPToolInfo FMCPTool_ExecutePython::GetToolInfo() const
 {
     FMCPToolInfo Info;
@@ -21,12 +38,17 @@ FMCPToolInfo FMCPTool_ExecutePython::GetToolInfo() const
     Info.Parameters  = {
         { TEXT("code"),        TEXT("Unreal Engine Python script using the unreal module API"), TEXT("string"),  true },
         { TEXT("undoOnError"), TEXT("If true, undo the transaction when Python execution fails"), TEXT("boolean"), true },
+        { TEXT("help"),        TEXT("Pass help=true for overview"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_ExecutePython::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sExecPythonHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         // 1. Extract and validate "code"

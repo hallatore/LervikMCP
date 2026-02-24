@@ -188,6 +188,42 @@ struct FMCPGraphHelpers
         return false;
     }
 
+    // Resolve an output-node alias + pin name to an EMaterialProperty.
+    // Returns true and sets OutProp on success; returns false and sets OutError on failure.
+    static bool ResolveAliasToMaterialProperty(const FString& AliasNode, const FString& PinName,
+        EMaterialProperty& OutProp, FString& OutError)
+    {
+        if (!MapMaterialProperty(PinName, OutProp))
+        {
+            FString PropNames;
+            for (const auto& Entry : KnownMaterialProperties())
+            {
+                if (PropNames.Len() > 0) PropNames += TEXT(", ");
+                PropNames += Entry.Name;
+            }
+            OutError = FString::Printf(
+                TEXT("'%s' recognized as material output node, but pin '%s' is not a valid material property. Valid properties: %s"),
+                *AliasNode, *PinName, *PropNames);
+            return false;
+        }
+        return true;
+    }
+
+    // Check if a string is a known alias for the material result/output node
+    static bool IsOutputNodeAlias(const FString& Name)
+    {
+        static const TCHAR* Aliases[] = {
+            TEXT("Output"), TEXT("Result"), TEXT("MaterialResult"),
+            TEXT("Material"), TEXT("MaterialOutput")
+        };
+        for (const TCHAR* Alias : Aliases)
+        {
+            if (Name.Equals(Alias, ESearchCase::IgnoreCase))
+                return true;
+        }
+        return false;
+    }
+
     // Get the open Blueprint editor for a blueprint, or nullptr if none is open
     static IBlueprintEditor* FindBlueprintEditor(UBlueprint* Blueprint)
     {

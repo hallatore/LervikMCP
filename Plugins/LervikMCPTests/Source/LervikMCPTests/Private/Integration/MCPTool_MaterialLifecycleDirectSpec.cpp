@@ -65,7 +65,7 @@ void FMCPTool_MaterialLifecycleDirectSpec::Define()
 			FMCPToolResult VecResult = GraphTool->Execute(
 				FMCPToolDirectTestHelper::MakeParamsFromJson(
 					FString::Printf(
-						TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos":[0,0]})"),
+						TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"),
 						*CreatedAssetPath)));
 			TestFalse("add Constant3Vector not error", VecResult.bIsError);
 
@@ -81,7 +81,7 @@ void FMCPTool_MaterialLifecycleDirectSpec::Define()
 			FMCPToolResult MulResult = GraphTool->Execute(
 				FMCPToolDirectTestHelper::MakeParamsFromJson(
 					FString::Printf(
-						TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply","pos":[200,0]})"),
+						TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply","pos_x":200,"pos_y":0})"),
 						*CreatedAssetPath)));
 			TestFalse("add Multiply not error", MulResult.bIsError);
 
@@ -195,7 +195,7 @@ void FMCPTool_MaterialLifecycleDirectSpec::Define()
 			// Step 5 — Call add_node while the editor is open
 			FMCPToolResult AddResult = GraphTool->Execute(
 				FMCPToolDirectTestHelper::MakeParamsFromJson(
-					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant","pos":[0,0]})"),
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant","pos_x":0,"pos_y":0})"),
 						*CreatedAssetPath)));
 			TestFalse("add_node not error", AddResult.bIsError);
 

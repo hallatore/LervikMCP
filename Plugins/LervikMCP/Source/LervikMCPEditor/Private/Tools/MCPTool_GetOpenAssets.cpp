@@ -1,4 +1,5 @@
 #include "Tools/MCPTool_GetOpenAssets.h"
+#include "MCPToolHelp.h"
 #include "Editor.h"
 #include "Subsystems/AssetEditorSubsystem.h"
 #include "Dom/JsonObject.h"
@@ -8,16 +9,34 @@
 #include "Async/Async.h"
 #include "Async/TaskGraphInterfaces.h"
 
+namespace
+{
+    static const FMCPToolHelpData sGetOpenAssetsHelp = {
+        TEXT("get_open_assets"),
+        TEXT("Returns the name, path and type of all currently open assets in the editor. No parameters required."),
+        TEXT(""),
+        nullptr, 0,
+        nullptr, 0
+    };
+}
+
 FMCPToolInfo FMCPTool_GetOpenAssets::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name = TEXT("get_open_assets");
     Info.Description = TEXT("Returns the name, path and type of all currently open assets in the editor");
+    Info.Parameters = {
+        { TEXT("help"), TEXT("Pass help=true for overview"), TEXT("string"), false },
+    };
     return Info;
 }
 
 FMCPToolResult FMCPTool_GetOpenAssets::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sGetOpenAssetsHelp, HelpResult))
+        return HelpResult;
+
     auto DoWork = []() -> FMCPToolResult
     {
         if (!GEditor)

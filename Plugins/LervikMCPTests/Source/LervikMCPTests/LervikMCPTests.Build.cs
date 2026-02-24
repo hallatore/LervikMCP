@@ -10,6 +10,7 @@ public class LervikMCPTests : ModuleRules
         PrivateDependencyModuleNames.AddRange(new string[]
         {
             "LervikMCP",
+            "LervikMCPEditor",
             "HTTP", "HTTPServer",
             "Json", "JsonUtilities",
             "UnrealEd",
@@ -19,5 +20,9 @@ public class LervikMCPTests : ModuleRules
             "AssetRegistry",
             "MaterialEditor",
         });
+
+        // Access LervikMCPEditor private headers for test sync guards
+        PrivateIncludePaths.Add(System.IO.Path.GetFullPath(
+            System.IO.Path.Combine(ModuleDirectory, "../../../LervikMCP/Source/LervikMCPEditor/Private")));
     }
 }

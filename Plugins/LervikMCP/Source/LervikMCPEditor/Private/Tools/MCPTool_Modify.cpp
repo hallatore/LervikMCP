@@ -1,6 +1,7 @@
 #include "Tools/MCPTool_Modify.h"
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 #include "MCPPropertyHelpers.h"
 
@@ -16,21 +17,43 @@
 
 #define LOCTEXT_NAMESPACE "LervikMCP"
 
+namespace
+{
+    static const FMCPParamHelp sModifyParams[] = {
+        { TEXT("target"),     TEXT("string"), true,  TEXT("Object path, actor label, 'selected', or 'ActorLabel.ComponentName'"), nullptr, TEXT("PointLight_0") },
+        { TEXT("properties"), TEXT("object"), false, TEXT("UProperty values via reflection. Format: {\"PropName\":value}"), nullptr, TEXT("{\"Intensity\":5000}") },
+        { TEXT("transform"),  TEXT("object"), false, TEXT("Transform override. Format: {\"location\":[x,y,z],\"rotation\":[p,y,r],\"scale\":[x,y,z]}"), nullptr, TEXT("{\"location\":[0,0,100]}") },
+    };
+
+    static const FMCPToolHelpData sModifyHelp = {
+        TEXT("modify"),
+        TEXT("Modify properties and/or transform of an actor or object. Does not apply to graph nodes — use 'graph' with action 'edit_node' for those."),
+        TEXT(""),
+        nullptr, 0,
+        sModifyParams, UE_ARRAY_COUNT(sModifyParams)
+    };
+}
+
 FMCPToolInfo FMCPTool_Modify::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("modify");
-    Info.Description = TEXT("Modify properties and/or transform of an actor or object in the UE5 editor");
+    Info.Description = TEXT("Modify properties and/or transform of an actor or object in the UE5 editor. Does not apply to Blueprint/Material graph nodes — use 'graph' tool with action 'edit_node' for those");
     Info.Parameters  = {
         { TEXT("target"),     TEXT("Object path, actor label, 'selected', or 'ActorLabel.ComponentName' to target a specific component on a level actor"),  TEXT("string"), true  },
         { TEXT("properties"), TEXT("UProperty values via reflection. Format: {\"PropName\":value}. Use find(type='property',target='path') to discover valid names"),  TEXT("object"), false },
         { TEXT("transform"),  TEXT("[actor] Transform override. Format: {\"location\":[x,y,z],\"rotation\":[p,y,r],\"scale\":[x,y,z]}. All fields optional"), TEXT("object"), false },
+        { TEXT("help"),       TEXT("Pass help=true for overview"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Modify::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sModifyHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString TargetParam;

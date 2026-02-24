@@ -46,7 +46,7 @@ void FMCPTool_GraphDirectSpec::Define()
 			if (!TestNotNull("material created", Mat)) return;
 
 			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply","pos":[0,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Multiply","pos_x":0,"pos_y":0})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
 
 			FMCPToolResult Result = GraphTool->Execute(Params);
@@ -133,6 +133,93 @@ void FMCPTool_GraphDirectSpec::Define()
 			TestTrue("result is bIsError when all disconnections fail", Result.bIsError);
 			TestTrue("error text mentions node not found",
 				Result.Content.Contains(TEXT("not found"), ESearchCase::IgnoreCase));
+		});
+	});
+
+	Describe("connect/disconnect missing keys error reporting", [this]()
+	{
+		It("connect with missing source key reports error with found keys", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectMissingSource"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"from": {"node": "00000000-0000-0000-0000-000000000000", "pin": "exec"},
+					"dest":  {"node": "00000000-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is error", Result.bIsError);
+			TestTrue("mentions missing 'source'", Result.Content.Contains(TEXT("'source'"), ESearchCase::IgnoreCase));
+			TestTrue("mentions found key 'from'", Result.Content.Contains(TEXT("'from'"), ESearchCase::IgnoreCase));
+		});
+
+		It("connect with missing dest key reports error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectMissingDest"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"source": {"node": "00000000-0000-0000-0000-000000000000", "pin": "exec"},
+					"to":     {"node": "00000000-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is error", Result.bIsError);
+			TestTrue("mentions missing 'dest'", Result.Content.Contains(TEXT("'dest'"), ESearchCase::IgnoreCase));
+		});
+
+		It("connect with non-object connection item reports error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestConnectNonObject"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "connect",
+					"target": "%s",
+					"connections": ["not_an_object"]
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is error", Result.bIsError);
+			TestTrue("mentions not a valid JSON object", Result.Content.Contains(TEXT("not a valid JSON object"), ESearchCase::IgnoreCase));
+		});
+
+		It("disconnect with missing source key reports error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestDisconnectMissingSource"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"from": {"node": "00000000-0000-0000-0000-000000000000", "pin": "exec"},
+					"dest":  {"node": "00000000-0000-0000-0000-000000000001", "pin": "then"}
+				})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is error", Result.bIsError);
+			TestTrue("mentions missing 'source'", Result.Content.Contains(TEXT("'source'"), ESearchCase::IgnoreCase));
 		});
 	});
 
@@ -243,7 +330,7 @@ void FMCPTool_GraphDirectSpec::Define()
 
 			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
 				FString::Printf(
-					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos":[200,300]})"),
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos_x":200,"pos_y":300})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
 
 			FMCPToolResult Result = GraphTool->Execute(Params);
@@ -433,7 +520,7 @@ void FMCPTool_GraphDirectSpec::Define()
 					"target": "%s",
 					"graph": "EventGraph",
 					"node_class": "CallFunction",
-					"pos": [0, 0],
+					"pos_x": 0, "pos_y": 0,
 					"properties": {"FunctionName": "PrintString", "FunctionOwner": "KismetSystemLibrary"}
 				})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
@@ -479,7 +566,7 @@ void FMCPTool_GraphDirectSpec::Define()
 					"target": "%s",
 					"graph": "EventGraph",
 					"node_class": "VariableGet",
-					"pos": [0, 0],
+					"pos_x": 0, "pos_y": 0,
 					"properties": {"VariableName": "TestHealth"}
 				})"),
 					*AssetPath));
@@ -515,7 +602,7 @@ void FMCPTool_GraphDirectSpec::Define()
 					"target": "%s",
 					"graph": "EventGraph",
 					"node_class": "SwitchOnInt",
-					"pos": [0, 0]
+					"pos_x": 0, "pos_y": 0
 				})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
 
@@ -663,7 +750,7 @@ void FMCPTool_GraphDirectSpec::Define()
 			if (!TestNotNull("material created", Mat)) return;
 
 			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"PrintString","pos":[0,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"PrintString","pos_x":0,"pos_y":0})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(Mat)));
 
 			FMCPToolResult Result = GraphTool->Execute(Params);
@@ -687,7 +774,7 @@ void FMCPTool_GraphDirectSpec::Define()
 			if (!TestNotNull("blueprint created", BP)) return;
 
 			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"NonExistentNodeClass","pos":[0,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"NonExistentNodeClass","pos_x":0,"pos_y":0})"),
 					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
 
 			FMCPToolResult Result = GraphTool->Execute(Params);
@@ -711,7 +798,7 @@ void FMCPTool_GraphDirectSpec::Define()
 
 			// Add first Branch node
 			TSharedPtr<FJsonObject> AddParams1 = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[0,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos_x":0,"pos_y":0})"),
 					*AssetPath));
 			FMCPToolResult AddResult1 = GraphTool->Execute(AddParams1);
 			if (!TestFalse("first Branch node added without error", AddResult1.bIsError)) return;
@@ -725,7 +812,7 @@ void FMCPTool_GraphDirectSpec::Define()
 
 			// Add second Branch node
 			TSharedPtr<FJsonObject> AddParams2 = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[400,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos_x":400,"pos_y":0})"),
 					*AssetPath));
 			FMCPToolResult AddResult2 = GraphTool->Execute(AddParams2);
 			if (!TestFalse("second Branch node added without error", AddResult2.bIsError)) return;
@@ -833,6 +920,101 @@ void FMCPTool_GraphDirectSpec::Define()
 
 			FMCPToolResult Result = GraphTool->Execute(Params);
 			TestTrue("result is bIsError when all disconnections fail", Result.bIsError);
+		});
+	});
+
+	Describe("disconnect idempotency", [this]()
+	{
+		It("blueprint disconnect when pins are not linked is silent no-op", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestDisconnectNoLink"));
+			if (!TestNotNull("blueprint created", BP)) return;
+			FString BPPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add two PrintString nodes (not connected)
+			auto AddNode = [&](const FString& Name) -> FString
+			{
+				TSharedPtr<FJsonObject> P = FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"CallFunction","pos_x":0,"pos_y":0,"properties":{"FunctionName":"PrintString","FunctionOwner":"KismetSystemLibrary"}})"), *BPPath));
+				FMCPToolResult R = GraphTool->Execute(P);
+				TSharedPtr<FJsonObject> J = FMCPToolDirectTestHelper::ParseResultJson(R);
+				FString Guid; if (J.IsValid()) J->TryGetStringField(TEXT("node_id"), Guid);
+				return Guid;
+			};
+			FString Guid1 = AddNode(TEXT("Node1"));
+			FString Guid2 = AddNode(TEXT("Node2"));
+			if (!TestFalse("guid1 empty", Guid1.IsEmpty())) return;
+			if (!TestFalse("guid2 empty", Guid2.IsEmpty())) return;
+
+			// Try disconnecting unlinked pins — should succeed silently
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "%s", "pin": "then"},
+					"dest":   {"node": "%s", "pin": "execute"}
+				})"), *BPPath, *Guid1, *Guid2));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+		});
+
+		It("material disconnect when property is not connected to source is silent no-op", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectPropNoLink"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Vec = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionConstant3Vector::StaticClass(), 0, 0);
+			if (!TestNotNull("vector expression", Vec)) return;
+
+			FString VecGuid = Vec->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Disconnect without ever connecting — should succeed silently
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "%s"},
+					"dest":   {"property": "BaseColor"}
+				})"), *FMCPToolDirectTestHelper::GetAssetPath(Mat), *VecGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+		});
+
+		It("material disconnect when expressions are not connected is silent no-op", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectExprNoLink"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Multiply = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionMultiply::StaticClass(), 0, 0);
+			UMaterialExpression* Add = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionAdd::StaticClass(), 200, 0);
+			if (!TestNotNull("Multiply expression", Multiply)) return;
+			if (!TestNotNull("Add expression", Add)) return;
+
+			FString MultiplyGuid = Multiply->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+			FString AddGuid = Add->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Disconnect without connecting — should succeed silently
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({
+					"action": "disconnect",
+					"target": "%s",
+					"source": {"node": "%s"},
+					"dest":   {"node": "%s"}
+				})"), *FMCPToolDirectTestHelper::GetAssetPath(Mat), *MultiplyGuid, *AddGuid));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
 		});
 	});
 
@@ -1005,6 +1187,302 @@ void FMCPTool_GraphDirectSpec::Define()
 		});
 	});
 
+	Describe("material output alias resolution", [this]()
+	{
+		It("resolves Output alias with valid property to ConnectMaterialProperty", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestOutputAlias"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			// Add a Constant3Vector node
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add node not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add result JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			// Connect with alias "Output" + pin "BaseColor"
+			FMCPToolResult ConnResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "BaseColor"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("connect not error", ConnResult.bIsError);
+
+			TSharedPtr<FJsonObject> ConnJson = FMCPToolDirectTestHelper::ParseResultJson(ConnResult);
+			if (!TestNotNull("connect JSON", ConnJson.Get())) return;
+			int32 Count = 0;
+			ConnJson->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("connected count is 1", Count, 1);
+		});
+
+		It("resolves Result alias case-insensitively", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestResultAlias"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"ScalarParameter","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			FMCPToolResult ConnResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "result", "pin": "Metallic"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("connect not error", ConnResult.bIsError);
+		});
+
+		It("alias with invalid property name returns error listing valid properties", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestAliasBadProp"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			FMCPToolResult ConnResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "FakeProperty"}
+					})"), *MatPath, *NodeId)));
+			TestTrue("connect is error", ConnResult.bIsError);
+			TestTrue("error mentions valid properties", ConnResult.Content.Contains(TEXT("BaseColor")));
+			TestTrue("error mentions recognized alias", ConnResult.Content.Contains(TEXT("material output node")));
+		});
+
+		It("non-alias invalid dest GUID still returns expression not found", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestNonAlias"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			FMCPToolResult ConnResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "SomeRandomNode", "pin": "A"}
+					})"), *MatPath, *NodeId)));
+			TestTrue("connect is error", ConnResult.bIsError);
+			TestTrue("error mentions not found", ConnResult.Content.Contains(TEXT("not found")));
+			TestFalse("error does NOT mention material output node", ConnResult.Content.Contains(TEXT("material output node")));
+		});
+	});
+
+	Describe("disconnect material output alias resolution", [this]()
+	{
+		It("disconnects via Output alias after connect via alias", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectOutputAlias"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			// Add a Constant3Vector node
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add node not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add result JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			// Connect via alias
+			FMCPToolResult ConnResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "BaseColor"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("connect not error", ConnResult.bIsError);
+
+			// Disconnect via alias
+			FMCPToolResult DiscResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "disconnect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "BaseColor"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("disconnect not error", DiscResult.bIsError);
+
+			TSharedPtr<FJsonObject> DiscJson = FMCPToolDirectTestHelper::ParseResultJson(DiscResult);
+			if (!TestNotNull("disconnect JSON", DiscJson.Get())) return;
+			int32 Count = 0;
+			DiscJson->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("disconnected count is 1", Count, 1);
+		});
+
+		It("disconnect via alias when not connected is silent no-op", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectAliasNoop"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			// Add a node but don't connect
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			// Disconnect via alias (nothing connected)
+			FMCPToolResult DiscResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "disconnect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "BaseColor"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("disconnect not error", DiscResult.bIsError);
+
+			TSharedPtr<FJsonObject> DiscJson = FMCPToolDirectTestHelper::ParseResultJson(DiscResult);
+			if (!TestNotNull("disconnect JSON", DiscJson.Get())) return;
+			int32 Count = 0;
+			DiscJson->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("disconnected count is 0", Count, 0);
+		});
+
+		It("disconnect via alias with invalid property returns error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectAliasBadProp"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"Constant3Vector","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			FMCPToolResult DiscResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "disconnect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "Output", "pin": "FakeProperty"}
+					})"), *MatPath, *NodeId)));
+			TestTrue("disconnect is error", DiscResult.bIsError);
+			TestTrue("error mentions valid properties", DiscResult.Content.Contains(TEXT("BaseColor")));
+			TestTrue("error mentions recognized alias", DiscResult.Content.Contains(TEXT("material output node")));
+		});
+
+		It("disconnect via Result alias works", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestDisconnectResultAlias"));
+			if (!TestNotNull("material created", Mat)) return;
+			FString MatPath = FMCPToolDirectTestHelper::GetAssetPath(Mat);
+
+			FMCPToolResult AddResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","node_class":"ScalarParameter","pos_x":0,"pos_y":0})"), *MatPath)));
+			TestFalse("add not error", AddResult.bIsError);
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add JSON", AddJson.Get())) return;
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id non-empty", NodeId.IsEmpty())) return;
+
+			// Connect via result alias
+			GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "connect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "result", "pin": "Metallic"}
+					})"), *MatPath, *NodeId)));
+
+			// Disconnect via result alias
+			FMCPToolResult DiscResult = GraphTool->Execute(
+				FMCPToolDirectTestHelper::MakeParamsFromJson(
+					FString::Printf(TEXT(R"({
+						"action": "disconnect",
+						"target": "%s",
+						"source": {"node": "%s", "pin": ""},
+						"dest":   {"node": "result", "pin": "Metallic"}
+					})"), *MatPath, *NodeId)));
+			TestFalse("disconnect not error", DiscResult.bIsError);
+
+			TSharedPtr<FJsonObject> DiscJson = FMCPToolDirectTestHelper::ParseResultJson(DiscResult);
+			if (!TestNotNull("disconnect JSON", DiscJson.Get())) return;
+			int32 Count = 0;
+			DiscJson->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("disconnected count is 1", Count, 1);
+		});
+	});
+
 	Describe("blueprint edit_node", [this]()
 	{
 		It("edit_node with pos sets NodePosX and NodePosY on a Blueprint node", [this]()
@@ -1018,7 +1496,7 @@ void FMCPTool_GraphDirectSpec::Define()
 
 			// Add a Branch node
 			TSharedPtr<FJsonObject> AddParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
-				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[0,0]})"),
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos_x":0,"pos_y":0})"),
 					*AssetPath));
 			FMCPToolResult AddResult = GraphTool->Execute(AddParams);
 			if (!TestFalse("add_node Branch succeeded", AddResult.bIsError)) return;
@@ -1033,7 +1511,7 @@ void FMCPTool_GraphDirectSpec::Define()
 			// Call edit_node with pos
 			TSharedPtr<FJsonObject> EditParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
 				FString::Printf(
-					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos":[500,600]})"),
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","pos_x":500,"pos_y":600})"),
 					*AssetPath, *NodeId));
 
 			FMCPToolResult Result = GraphTool->Execute(EditParams);
@@ -1112,7 +1590,7 @@ void FMCPTool_GraphDirectSpec::Define()
 					"action": "add_node",
 					"target": "%s",
 					"nodes": [
-						{"node_class": "Multiply", "pos": [0, 0]},
+						{"node_class": "Multiply", "pos_x": 0, "pos_y": 0},
 						{"node_class": "Add"}
 					]
 				})"),
@@ -1136,6 +1614,108 @@ void FMCPTool_GraphDirectSpec::Define()
 					TestTrue("second node has error field", SecondNode.IsValid() && SecondNode->HasField(TEXT("error")));
 				}
 			}
+		});
+	});
+
+	Describe("add_node graph_name alias", [this]()
+	{
+		It("add_node with graph_name targets a function graph", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestGraphNameAlias"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			// First create a function graph
+			TSharedPtr<FJsonObject> FuncParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_function","target":"%s","name":"MyTestFunc"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+			FMCPToolResult FuncResult = GraphTool->Execute(FuncParams);
+			TestFalse("add_function succeeded", FuncResult.bIsError);
+
+			// Now add a node using graph_name to target the function graph
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph_name":"MyTestFunc","node_class":"CallFunction","function":"PrintString","function_owner":"KismetSystemLibrary","pos_x":100,"pos_y":50})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("add_node result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			// Single node returns flat object with node_id
+			FString NodeId;
+			TestTrue("has node_id", Json->TryGetStringField(TEXT("node_id"), NodeId));
+			TestFalse("node_id is not empty", NodeId.IsEmpty());
+		});
+
+		It("add_node with invalid graph_name lists available graphs in error", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestGraphNameNotFound"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph_name":"NonExistentGraph","node_class":"Branch","pos_x":0,"pos_y":0})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestTrue("result is error", Result.bIsError);
+			TestTrue("error mentions available graphs", Result.Content.Contains(TEXT("Available"), ESearchCase::IgnoreCase));
+			TestTrue("error mentions EventGraph", Result.Content.Contains(TEXT("EventGraph")));
+		});
+	});
+
+	Describe("add_variable error reporting", [this]()
+	{
+		It("returns error when var_type is invalid", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestAddVarInvalidType"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_variable","target":"%s","name":"MyVar","var_type":"NotARealType"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not a hard error (returns success with errors array)", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Errors = nullptr;
+			TestTrue("has errors array", Json->TryGetArrayField(TEXT("errors"), Errors));
+			if (Errors) TestTrue("errors array is not empty", Errors->Num() > 0);
+
+			int32 Count = -1;
+			Json->TryGetNumberField(TEXT("count"), Count);
+			TestEqual("count is 0", Count, 0);
+		});
+
+		It("returns error when name is missing", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestAddVarMissingName"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_variable","target":"%s","var_type":"float"})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(BP)));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not a hard error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Errors = nullptr;
+			TestTrue("has errors array", Json->TryGetArrayField(TEXT("errors"), Errors));
+			if (Errors) TestTrue("errors array is not empty", Errors->Num() > 0);
 		});
 	});
 }

@@ -1,6 +1,7 @@
 #include "Tools/MCPTool_Trace.h"
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "Tools/TraceAnalyzer.h"
 
 #include "Dom/JsonObject.h"
@@ -26,6 +27,40 @@ TSharedPtr<FJsonObject> GpuNodeToJson(const FTraceGpuNode& Node)
     return Obj;
 }
 
+// ── Help data ────────────────────────────────────────────────────────────
+
+static const FMCPParamHelp sTraceStartParams[] = {
+    { TEXT("channels"), TEXT("string"),  false, TEXT("Trace channels comma-separated. Default: cpu,gpu,frame,bookmark"), nullptr, TEXT("cpu,gpu,frame,bookmark") },
+    { TEXT("path"),     TEXT("string"),  false, TEXT("Optional output .utrace file path"), nullptr, nullptr },
+};
+
+static const FMCPParamHelp sTraceAnalyzeParams[] = {
+    { TEXT("path"),   TEXT("string"),  true,  TEXT("Required .utrace file path to analyze"), nullptr, nullptr },
+    { TEXT("depth"),  TEXT("integer"), false, TEXT("GPU tree depth levels. Default: 1"), nullptr, TEXT("2") },
+    { TEXT("min_ms"), TEXT("number"),  false, TEXT("Min avg ms filter threshold. Default: 0.1"), nullptr, TEXT("0.5") },
+    { TEXT("filter"), TEXT("string"),  false, TEXT("Case-insensitive substring filter on GPU node names. Overrides depth limit"), nullptr, TEXT("Shadow") },
+};
+
+static const FMCPParamHelp sTraceTestParams[] = {
+    { TEXT("channels"), TEXT("string"), false, TEXT("Trace channels. Default: cpu,gpu,frame,bookmark"), nullptr, nullptr },
+};
+
+static const FMCPActionHelp sTraceActions[] = {
+    { TEXT("start"),   TEXT("Start a new Unreal Insights trace to file"), sTraceStartParams, UE_ARRAY_COUNT(sTraceStartParams), nullptr },
+    { TEXT("stop"),    TEXT("Stop the active trace and flush to disk"), nullptr, 0, nullptr },
+    { TEXT("status"),  TEXT("Check if a trace is currently active"), nullptr, 0, nullptr },
+    { TEXT("analyze"), TEXT("Analyze GPU pass data from a .utrace file"), sTraceAnalyzeParams, UE_ARRAY_COUNT(sTraceAnalyzeParams), nullptr },
+    { TEXT("test"),    TEXT("Start trace, wait 5s, stop, and return combined result"), sTraceTestParams, UE_ARRAY_COUNT(sTraceTestParams), nullptr },
+};
+
+static const FMCPToolHelpData sTraceHelp = {
+    TEXT("trace"),
+    TEXT("Control Unreal Insights tracing and analyze GPU data from .utrace files"),
+    TEXT("action"),
+    sTraceActions, UE_ARRAY_COUNT(sTraceActions),
+    nullptr, 0
+};
+
 } // namespace
 
 FMCPToolInfo FMCPTool_Trace::GetToolInfo() const
@@ -40,12 +75,17 @@ FMCPToolInfo FMCPTool_Trace::GetToolInfo() const
         { TEXT("depth"),    TEXT("[analyze] GPU tree depth levels. Default: 1"),                           TEXT("integer"), false },
         { TEXT("min_ms"),   TEXT("[analyze] Min avg ms filter threshold. Default: 0.1"),                  TEXT("number"),  false },
         { TEXT("filter"),   TEXT("[analyze] Case-insensitive substring filter on GPU node names. Overrides depth limit"), TEXT("string"), false },
+        { TEXT("help"),     TEXT("Pass help=true for overview, help='action_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sTraceHelp, HelpResult))
+        return HelpResult;
+
     FString Action;
     if (!Params->TryGetStringField(TEXT("action"), Action))
         return FMCPToolResult::Error(TEXT("'action' is required"));

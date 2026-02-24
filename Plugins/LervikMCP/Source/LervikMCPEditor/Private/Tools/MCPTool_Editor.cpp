@@ -1,6 +1,7 @@
 #include "Tools/MCPTool_Editor.h"
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 
 #include "Subsystems/AssetEditorSubsystem.h"
@@ -43,6 +44,31 @@ namespace
         }
         return Targets;
     }
+
+    // ── Help data ────────────────────────────────────────────────────────
+
+    static const FMCPParamHelp sEditorTargetParam[] = {
+        { TEXT("target"), TEXT("string|array"), false, TEXT("Asset path(s) or actor label(s)"), nullptr, TEXT("/Game/BP_MyActor") },
+    };
+
+    static const FMCPActionHelp sEditorActions[] = {
+        { TEXT("open"),             TEXT("Open asset(s) in their editor"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("close"),            TEXT("Close asset editor(s)"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("save"),             TEXT("Save asset(s)"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("select"),           TEXT("Select level actor(s)"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("deselect"),         TEXT("Deselect actor(s). No target = deselect all"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("focus"),            TEXT("Focus viewport on actor(s)"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("navigate"),         TEXT("Sync Content Browser to asset path"), sEditorTargetParam, UE_ARRAY_COUNT(sEditorTargetParam), nullptr },
+        { TEXT("get_viewport_info"), TEXT("Return viewport camera position, rotation, and PIE state"), nullptr, 0, nullptr },
+    };
+
+    static const FMCPToolHelpData sEditorHelp = {
+        TEXT("editor"),
+        TEXT("Editor state management: open, close, select, deselect, focus, save, navigate assets/actors, or get_viewport_info"),
+        TEXT("action"),
+        sEditorActions, UE_ARRAY_COUNT(sEditorActions),
+        nullptr, 0
+    };
 }
 
 FMCPToolInfo FMCPTool_Editor::GetToolInfo() const
@@ -53,12 +79,17 @@ FMCPToolInfo FMCPTool_Editor::GetToolInfo() const
     Info.Parameters  = {
         { TEXT("action"), TEXT("Values: open|close|save|select|deselect|focus|navigate|get_viewport_info. open/close/save operate on assets. select/deselect/focus operate on level actors. navigate syncs Content Browser. get_viewport_info returns viewport/camera/PIE state"), TEXT("string"),       true  },
         { TEXT("target"), TEXT("Asset path(s) or actor label(s). String or array. deselect with no target deselects all"), TEXT("string|array"), false, TEXT("string") },
+        { TEXT("help"),   TEXT("Pass help=true for overview, help='action_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Editor::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sEditorHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Action;

@@ -1,5 +1,6 @@
 #include "Misc/AutomationTest.h"
 #include "MCPToolDirectTestHelper.h"
+#include "MCPGraphHelpers.h"
 
 // Returns the Description of the named parameter, or empty string if not found.
 static FString GetMCPParamDesc(const FMCPToolInfo& Info, const TCHAR* ParamName)
@@ -65,6 +66,17 @@ void FMCPTool_DescriptionsSpec::Define()
 			TestTrue("properties description includes a JSON object format example (contains '{')",
 				Desc.Contains(TEXT("{")));
 		});
+
+		It("description directs graph node edits to the graph tool", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("modify"));
+			if (!TestNotNull("modify tool registered", Tool)) return;
+			FString Desc = Tool->GetToolInfo().Description;
+			TestTrue("description mentions graph tool",
+				Desc.Contains(TEXT("graph tool"), ESearchCase::IgnoreCase));
+			TestTrue("description mentions graph nodes exclusion",
+				Desc.Contains(TEXT("graph node"), ESearchCase::IgnoreCase));
+		});
 	});
 
 	// ── graph tool ───────────────────────────────────────────────────────────
@@ -91,13 +103,13 @@ void FMCPTool_DescriptionsSpec::Define()
 				Desc.Contains(TEXT("Lerp"),     ESearchCase::CaseSensitive));
 		});
 
-		It("pos param mentions flat array format", [this]()
+		It("pos_x param exists as integer type", [this]()
 		{
 			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
 			if (!TestNotNull("graph tool registered", Tool)) return;
-			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("pos"));
-			TestTrue("pos description mentions 'flat'",
-				Desc.Contains(TEXT("flat"), ESearchCase::IgnoreCase));
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("pos_x"));
+			TestTrue("pos_x description is not empty",
+				!Desc.IsEmpty());
 		});
 
 		It("source param mentions inspect for pin discovery", [this]()
@@ -107,6 +119,86 @@ void FMCPTool_DescriptionsSpec::Define()
 			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("source"));
 			TestTrue("source description mentions 'inspect'",
 				Desc.Contains(TEXT("inspect"), ESearchCase::IgnoreCase));
+		});
+
+		It("nodes batch description documents inner object keys", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("nodes"));
+			TestTrue("nodes description contains 'node_class'",
+				Desc.Contains(TEXT("node_class")));
+		});
+
+		It("edits batch description documents inner object keys", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("edits"));
+			TestTrue("edits description contains 'pin_defaults'",
+				Desc.Contains(TEXT("pin_defaults")));
+		});
+
+		It("dest param lists ALL known material property names", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("dest"));
+			for (const auto& Entry : FMCPGraphHelpers::KnownMaterialProperties())
+			{
+				TestTrue(
+					FString::Printf(TEXT("dest description contains '%s'"), Entry.Name),
+					Desc.Contains(Entry.Name, ESearchCase::CaseSensitive));
+			}
+		});
+
+		It("dest description mentions output node aliases", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("dest"));
+			TestTrue("dest description mentions Output alias",
+				Desc.Contains(TEXT("Output")));
+			TestTrue("dest description mentions Result alias",
+				Desc.Contains(TEXT("Result")));
+		});
+
+		It("connections batch description documents inner object keys", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("connections"));
+			TestTrue("connections description contains 'source'",
+				Desc.Contains(TEXT("source")));
+			TestTrue("connections description contains 'dest'",
+				Desc.Contains(TEXT("dest")));
+		});
+
+		It("connections description includes material property dest example", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("connections"));
+			TestTrue("connections description contains 'property'",
+				Desc.Contains(TEXT("property")));
+		});
+
+		It("variables batch description documents inner object keys", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("variables"));
+			TestTrue("variables description contains 'var_type'",
+				Desc.Contains(TEXT("var_type")));
+		});
+
+		It("components batch description documents inner object keys", [this]()
+		{
+			IMCPTool* Tool = FMCPToolDirectTestHelper::FindTool(TEXT("graph"));
+			if (!TestNotNull("graph tool registered", Tool)) return;
+			FString Desc = GetMCPParamDesc(Tool->GetToolInfo(), TEXT("components"));
+			TestTrue("components description contains 'component_class'",
+				Desc.Contains(TEXT("component_class")));
 		});
 	});
 

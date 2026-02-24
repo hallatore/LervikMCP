@@ -1,6 +1,7 @@
 #include "Tools/MCPTool_Create.h"
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 #include "MCPPropertyHelpers.h"
 
@@ -22,6 +23,41 @@
 
 #define LOCTEXT_NAMESPACE "LervikMCP"
 
+namespace
+{
+    static const FMCPParamHelp sCreateAssetParams[] = {
+        { TEXT("class"),        TEXT("string"), false, TEXT("Asset class. Required when no template"), TEXT("Blueprint, Material, MaterialInstanceConstant"), TEXT("Material") },
+        { TEXT("name"),         TEXT("string"), true,  TEXT("Asset name"), nullptr, TEXT("M_NewMaterial") },
+        { TEXT("path"),         TEXT("string"), false, TEXT("Package path. Default: /Game"), nullptr, TEXT("/Game/Materials") },
+        { TEXT("parent_class"), TEXT("string"), false, TEXT("Parent class for Blueprint. Default: Actor"), TEXT("Actor, Character, Pawn"), nullptr },
+        { TEXT("template"),     TEXT("string"), false, TEXT("Source asset path to duplicate"), nullptr, TEXT("/Game/BP_Template") },
+        { TEXT("properties"),   TEXT("object"), false, TEXT("UProperty values. Format: {\"PropName\":value}"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sCreateActorParams[] = {
+        { TEXT("class"),      TEXT("string"),       false, TEXT("Actor class"), TEXT("PointLight, CameraActor, StaticMeshActor"), TEXT("PointLight") },
+        { TEXT("name"),       TEXT("string"),       true,  TEXT("Actor label"), nullptr, TEXT("MyLight") },
+        { TEXT("location"),   TEXT("array|object"), false, TEXT("World position [x,y,z]"), nullptr, TEXT("[0,0,100]") },
+        { TEXT("rotation"),   TEXT("array|object"), false, TEXT("World rotation [pitch,yaw,roll]"), nullptr, TEXT("[0,90,0]") },
+        { TEXT("scale"),      TEXT("array|object"), false, TEXT("World scale [x,y,z]"), nullptr, nullptr },
+        { TEXT("template"),   TEXT("string"),       false, TEXT("Source actor to duplicate"), nullptr, nullptr },
+        { TEXT("properties"), TEXT("object"),       false, TEXT("UProperty values. Format: {\"PropName\":value}"), nullptr, nullptr },
+    };
+
+    static const FMCPActionHelp sCreateActions[] = {
+        { TEXT("asset"), TEXT("Create a new asset or duplicate from template"), sCreateAssetParams, UE_ARRAY_COUNT(sCreateAssetParams), nullptr },
+        { TEXT("actor"), TEXT("Spawn an actor in the current level"), sCreateActorParams, UE_ARRAY_COUNT(sCreateActorParams), nullptr },
+    };
+
+    static const FMCPToolHelpData sCreateHelp = {
+        TEXT("create"),
+        TEXT("Create assets or spawn actors in the level"),
+        TEXT("type"),
+        sCreateActions, UE_ARRAY_COUNT(sCreateActions),
+        nullptr, 0
+    };
+}
+
 FMCPToolInfo FMCPTool_Create::GetToolInfo() const
 {
     FMCPToolInfo Info;
@@ -38,12 +74,17 @@ FMCPToolInfo FMCPTool_Create::GetToolInfo() const
         { TEXT("template"),     TEXT("Source asset/actor path to duplicate. [actor] location/rotation/scale override the duplicate's transform"), TEXT("string"), false },
         { TEXT("scale"),        TEXT("[actor] World scale. Format: [x,y,z]"),                                                   TEXT("array|object"),  false, TEXT("number") },
         { TEXT("properties"),   TEXT("UProperty values. Format: {\"PropName\":value}. Nested: {\"ComponentName\":{\"Prop\":value}}"), TEXT("object"), false },
+        { TEXT("help"),         TEXT("Pass help=true for overview, help='type_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Create::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sCreateHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Type;

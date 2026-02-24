@@ -2,10 +2,42 @@
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
 #include "MCPSearchPatterns.h"
+#include "MCPToolHelp.h"
 
 #include "HAL/IConsoleManager.h"
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
+
+namespace
+{
+    static const FMCPParamHelp sRtExecGetCvarParams[] = {
+        { TEXT("name"), TEXT("string"), true, TEXT("Console variable name"), nullptr, TEXT("r.ScreenPercentage") },
+    };
+
+    static const FMCPParamHelp sRtExecSetCvarParams[] = {
+        { TEXT("name"),  TEXT("string"), true, TEXT("Console variable name"), nullptr, TEXT("r.ScreenPercentage") },
+        { TEXT("value"), TEXT("string"), true, TEXT("Value to set"), nullptr, TEXT("100") },
+    };
+
+    static const FMCPParamHelp sRtExecListCvarsParams[] = {
+        { TEXT("filter"),      TEXT("string"),  false, TEXT("Prefix or wildcard filter for variable names"), nullptr, TEXT("r.Shadow*") },
+        { TEXT("includeHelp"), TEXT("boolean"), false, TEXT("Include help text and type. Default: false"), nullptr, nullptr },
+    };
+
+    static const FMCPActionHelp sRtExecActions[] = {
+        { TEXT("get_cvar"),   TEXT("Get the current value of a console variable"), sRtExecGetCvarParams, UE_ARRAY_COUNT(sRtExecGetCvarParams), nullptr },
+        { TEXT("set_cvar"),   TEXT("Set a console variable value"), sRtExecSetCvarParams, UE_ARRAY_COUNT(sRtExecSetCvarParams), nullptr },
+        { TEXT("list_cvars"), TEXT("List console variables matching a filter"), sRtExecListCvarsParams, UE_ARRAY_COUNT(sRtExecListCvarsParams), nullptr },
+    };
+
+    static const FMCPToolHelpData sRtExecHelp = {
+        TEXT("execute"),
+        TEXT("Get, set, or list console variables (CVars)"),
+        TEXT("action"),
+        sRtExecActions, UE_ARRAY_COUNT(sRtExecActions),
+        nullptr, 0
+    };
+}
 
 FMCPToolInfo FMCPTool_Execute::GetToolInfo() const
 {
@@ -18,12 +50,17 @@ FMCPToolInfo FMCPTool_Execute::GetToolInfo() const
         { TEXT("value"),       TEXT("[set_cvar] Value to set"),                                                TEXT("string"),  false },
         { TEXT("filter"),      TEXT("[list_cvars] Prefix or wildcard filter for variable names"),              TEXT("string"),  false },
         { TEXT("includeHelp"), TEXT("[list_cvars] Include help text and type. Default: false"),                TEXT("boolean"), false },
+        { TEXT("help"),        TEXT("Pass help=true for overview, help='action_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Execute::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sRtExecHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Action;

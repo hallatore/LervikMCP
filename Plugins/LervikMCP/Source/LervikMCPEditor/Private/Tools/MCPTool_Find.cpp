@@ -2,6 +2,7 @@
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
 #include "MCPSearchPatterns.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -39,6 +40,57 @@ namespace
         Res->SetNumberField(TEXT("count"), Items.Num());
         return FMCPJsonHelpers::SuccessResponse(Res);
     }
+
+    // ── Help data ────────────────────────────────────────────────────────
+
+    static const FMCPParamHelp sFindAssetParams[] = {
+        { TEXT("class"),     TEXT("string"),  false, TEXT("Class filter (wildcards supported)"), TEXT("Blueprint, Material, StaticMesh, Texture2D"), TEXT("Material") },
+        { TEXT("path"),      TEXT("string"),  false, TEXT("Path/folder filter (wildcards supported)"), nullptr, TEXT("/Game/Materials") },
+        { TEXT("name"),      TEXT("string"),  false, TEXT("Name filter (wildcards supported)"), nullptr, TEXT("M_*") },
+        { TEXT("tag"),       TEXT("string"),  false, TEXT("Asset registry tag filter. Format: tag_name=value"), nullptr, nullptr },
+        { TEXT("filter"),    TEXT("string"),  false, TEXT("Post-filter glob/regex on result names"), nullptr, nullptr },
+        { TEXT("recursive"), TEXT("boolean"), false, TEXT("Search recursively. Default: true"), nullptr, nullptr },
+        { TEXT("limit"),     TEXT("integer"), false, TEXT("Max results. Default: 100"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sFindActorParams[] = {
+        { TEXT("class"),  TEXT("string"),  false, TEXT("Actor class filter (wildcards supported)"), nullptr, TEXT("PointLight") },
+        { TEXT("name"),   TEXT("string"),  false, TEXT("Name/label filter (wildcards supported)"), nullptr, nullptr },
+        { TEXT("filter"), TEXT("string"),  false, TEXT("Post-filter glob/regex on result names"), nullptr, nullptr },
+        { TEXT("limit"),  TEXT("integer"), false, TEXT("Max results. Default: 100"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sFindClassParams[] = {
+        { TEXT("parent"), TEXT("string"),  false, TEXT("Parent class name for derived class search"), nullptr, TEXT("Actor") },
+        { TEXT("name"),   TEXT("string"),  false, TEXT("Name filter (wildcards supported)"), nullptr, nullptr },
+        { TEXT("filter"), TEXT("string"),  false, TEXT("Post-filter glob/regex on result names"), nullptr, nullptr },
+        { TEXT("limit"),  TEXT("integer"), false, TEXT("Max results. Default: 100"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sFindPropertyParams[] = {
+        { TEXT("target"), TEXT("string"),  true,  TEXT("Object path to list UProperty names"), nullptr, TEXT("/Game/BP_MyActor.BP_MyActor") },
+        { TEXT("filter"), TEXT("string"),  false, TEXT("Post-filter glob/regex on result names"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sFindSelectionParams[] = {
+        { TEXT("filter"), TEXT("string"),  false, TEXT("Post-filter glob/regex on result names"), nullptr, nullptr },
+    };
+
+    static const FMCPActionHelp sFindActions[] = {
+        { TEXT("asset"),     TEXT("Search assets in the Asset Registry"), sFindAssetParams, UE_ARRAY_COUNT(sFindAssetParams), nullptr },
+        { TEXT("actor"),     TEXT("Search actors in the current level"), sFindActorParams, UE_ARRAY_COUNT(sFindActorParams), nullptr },
+        { TEXT("class"),     TEXT("Find classes derived from a parent class"), sFindClassParams, UE_ARRAY_COUNT(sFindClassParams), nullptr },
+        { TEXT("property"),  TEXT("List UProperty names on an object"), sFindPropertyParams, UE_ARRAY_COUNT(sFindPropertyParams), nullptr },
+        { TEXT("selection"), TEXT("Get currently selected actors"), sFindSelectionParams, UE_ARRAY_COUNT(sFindSelectionParams), nullptr },
+    };
+
+    static const FMCPToolHelpData sFindHelp = {
+        TEXT("find"),
+        TEXT("Search for assets, actors, classes, properties, or the current selection in the UE5 editor"),
+        TEXT("type"),
+        sFindActions, UE_ARRAY_COUNT(sFindActions),
+        nullptr, 0
+    };
 }
 
 FMCPToolInfo FMCPTool_Find::GetToolInfo() const
@@ -57,12 +109,17 @@ FMCPToolInfo FMCPTool_Find::GetToolInfo() const
         { TEXT("filter"),    TEXT("Post-filter glob/regex on result names"),                                               TEXT("string"),  false },
         { TEXT("recursive"), TEXT("[asset] Search recursively. Default: true"),                                            TEXT("boolean"), false },
         { TEXT("limit"),     TEXT("Max results. Default: 100"),                                                            TEXT("integer"), false },
+        { TEXT("help"),      TEXT("Pass help=true for overview, help='type_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Find::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sFindHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Type;

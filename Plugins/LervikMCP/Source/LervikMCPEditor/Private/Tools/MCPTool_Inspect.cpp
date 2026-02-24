@@ -3,6 +3,7 @@
 #include "MCPGraphHelpers.h"
 #include "MCPJsonHelpers.h"
 #include "MCPSearchPatterns.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 
 #include "Editor.h"
@@ -160,6 +161,42 @@ namespace
         return Obj;
     }
 
+    // ── Help data ────────────────────────────────────────────────────────
+
+    static const FMCPParamHelp sInspectCommonParams[] = {
+        { TEXT("target"), TEXT("string"),  true,  TEXT("Object path, actor label, 'selected', or 'AssetPath::NodeGUID' for pins"), nullptr, TEXT("/Game/BP_MyActor") },
+        { TEXT("filter"), TEXT("string"),  false, TEXT("Glob/regex to filter results by name"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sInspectPropsParams[] = {
+        { TEXT("depth"),  TEXT("integer"), false, TEXT("Property traversal depth. Default: 1"), nullptr, TEXT("2") },
+        { TEXT("detail"), TEXT("string"),  false, TEXT("Values: all|skip_defaults. Default: skip_defaults"), TEXT("all, skip_defaults"), nullptr },
+    };
+
+    static const FMCPParamHelp sInspectPinsParams[] = {
+        { TEXT("target"), TEXT("string"),  true,  TEXT("Format: 'AssetPath::NodeGUID'"), nullptr, TEXT("/Game/BP_MyActor::A1B2C3D4") },
+    };
+
+    static const FMCPActionHelp sInspectActions[] = {
+        { TEXT("properties"),  TEXT("Inspect UObject properties via reflection"), sInspectPropsParams, UE_ARRAY_COUNT(sInspectPropsParams), nullptr },
+        { TEXT("components"),  TEXT("List components on an actor or Blueprint"), nullptr, 0, nullptr },
+        { TEXT("nodes"),       TEXT("List Blueprint graph nodes or Material expression nodes"), nullptr, 0, nullptr },
+        { TEXT("expressions"), TEXT("List Material expressions (alias for nodes on Materials)"), nullptr, 0, nullptr },
+        { TEXT("variables"),   TEXT("List Blueprint variables"), nullptr, 0, nullptr },
+        { TEXT("functions"),   TEXT("List Blueprint function graphs"), nullptr, 0, nullptr },
+        { TEXT("pins"),        TEXT("List pins on a specific node. Target: 'AssetPath::NodeGUID'"), sInspectPinsParams, UE_ARRAY_COUNT(sInspectPinsParams), nullptr },
+        { TEXT("parameters"),  TEXT("List Material parameters"), nullptr, 0, nullptr },
+        { TEXT("connections"), TEXT("List connections on a specific node. Target: 'AssetPath::NodeGUID'"), sInspectPinsParams, UE_ARRAY_COUNT(sInspectPinsParams), nullptr },
+    };
+
+    static const FMCPToolHelpData sInspectHelp = {
+        TEXT("inspect"),
+        TEXT("Inspect properties, components, nodes, variables, functions, pins, or parameters of an asset or actor"),
+        TEXT("type"),
+        sInspectActions, UE_ARRAY_COUNT(sInspectActions),
+        sInspectCommonParams, UE_ARRAY_COUNT(sInspectCommonParams)
+    };
+
 }
 
 FMCPToolInfo FMCPTool_Inspect::GetToolInfo() const
@@ -173,12 +210,17 @@ FMCPToolInfo FMCPTool_Inspect::GetToolInfo() const
         { TEXT("filter"), TEXT("Glob/regex to filter results by name"), TEXT("string"), false },
         { TEXT("depth"),  TEXT("Property traversal depth. Default: 1"),          TEXT("integer"), false },
         { TEXT("detail"), TEXT("Values: all|skip_defaults. Default: skip_defaults. skip_defaults omits properties with default/empty values"), TEXT("string"), false },
+        { TEXT("help"),   TEXT("Pass help=true for overview, help='type_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Inspect::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sInspectHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString TargetParam;

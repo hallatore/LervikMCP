@@ -86,7 +86,7 @@ void FMCPTool_BlueprintLifecycleDirectSpec::Define()
 			// Step 6 — Call add_node while the editor is open
 			FMCPToolResult AddResult = GraphTool->Execute(
 				FMCPToolDirectTestHelper::MakeParamsFromJson(
-					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos":[0,0]})"),
+					FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos_x":0,"pos_y":0})"),
 						*CreatedAssetPath)));
 			TestFalse("add_node not error", AddResult.bIsError);
 

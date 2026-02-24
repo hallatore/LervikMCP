@@ -1,6 +1,7 @@
 #include "Tools/MCPTool_Graph.h"
 #include "MCPGameThreadHelper.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 #include "MCPGraphHelpers.h"
 
@@ -87,8 +88,136 @@ namespace
     }
 
     // -------------------------------------------------------------------------
+    // Help data
+    // -------------------------------------------------------------------------
+
+    static const FMCPParamHelp sGraphCommonParams[] = {
+        { TEXT("target"), TEXT("string"), true, TEXT("Blueprint or Material asset path"), nullptr, TEXT("/Game/BP_MyActor") },
+    };
+
+    static const FMCPParamHelp sAddNodeParams[] = {
+        { TEXT("graph"),          TEXT("string"),  false, TEXT("Graph name (BP only). Default: EventGraph. Alias: graph_name"), nullptr, TEXT("EventGraph") },
+        { TEXT("node_class"),     TEXT("string"),  false, TEXT("Node type"), TEXT("CallFunction, Event, CustomEvent, VariableGet, VariableSet, Branch, Sequence, Self, DynamicCast, SpawnActor, MakeArray, Select, SwitchOnInt, SwitchOnString, SwitchOnEnum, MacroInstance, ForEachLoop. Materials: Multiply, Add, Lerp, ScalarParameter, VectorParameter, TextureCoordinate, Constant"), TEXT("CallFunction") },
+        { TEXT("function"),       TEXT("string"),  false, TEXT("Function name for CallFunction nodes"), nullptr, TEXT("PrintString") },
+        { TEXT("function_owner"), TEXT("string"),  false, TEXT("Class owning the function; also cast target for DynamicCast"), nullptr, TEXT("KismetSystemLibrary") },
+        { TEXT("event_name"),     TEXT("string"),  false, TEXT("Event name for Event/CustomEvent; macro name for MacroInstance"), nullptr, nullptr },
+        { TEXT("variable_name"),  TEXT("string"),  false, TEXT("Variable name for VariableGet/VariableSet"), nullptr, nullptr },
+        { TEXT("pos_x"),          TEXT("integer"), false, TEXT("Node X position"), nullptr, TEXT("200") },
+        { TEXT("pos_y"),          TEXT("integer"), false, TEXT("Node Y position"), nullptr, TEXT("0") },
+        { TEXT("nodes"),          TEXT("array"),   false, TEXT("Batch: array of node objects"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sEditNodeParams[] = {
+        { TEXT("graph"),        TEXT("string"),  false, TEXT("Graph name. Default: EventGraph"), nullptr, nullptr },
+        { TEXT("node"),         TEXT("string"),  true,  TEXT("Node GUID to edit"), nullptr, nullptr },
+        { TEXT("properties"),   TEXT("object"),  false, TEXT("Reflection properties {PropName:value}"), nullptr, nullptr },
+        { TEXT("pin_defaults"), TEXT("object"),  false, TEXT("Pin default values {PinName:value}"), nullptr, nullptr },
+        { TEXT("pos_x"),        TEXT("integer"), false, TEXT("New X position"), nullptr, nullptr },
+        { TEXT("pos_y"),        TEXT("integer"), false, TEXT("New Y position"), nullptr, nullptr },
+        { TEXT("edits"),        TEXT("array"),   false, TEXT("Batch: array of edit objects"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sConnectParams[] = {
+        { TEXT("graph"),       TEXT("string"), false, TEXT("Graph name. Default: EventGraph"), nullptr, nullptr },
+        { TEXT("source"),      TEXT("object"), false, TEXT("Output pin {node:GUID, pin:PinName}"), nullptr, nullptr },
+        { TEXT("dest"),        TEXT("object"), false, TEXT("Input pin {node:GUID, pin:PinName} or {property:PropName} for materials"), nullptr, nullptr },
+        { TEXT("connections"), TEXT("array"),  false, TEXT("Batch: array of {source, dest} objects"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sAddVarParams[] = {
+        { TEXT("name"),          TEXT("string"), true,  TEXT("Variable name (alias: var_name)"), nullptr, TEXT("Health") },
+        { TEXT("var_type"),      TEXT("string"), true,  TEXT("Variable type"), TEXT("float, int, bool, string, byte, name, text, Vector, Rotator, Transform, Object:ClassName"), TEXT("float") },
+        { TEXT("default_value"), TEXT("string"), false, TEXT("Default value as string"), nullptr, TEXT("100.0") },
+        { TEXT("category"),      TEXT("string"), false, TEXT("Variable category"), nullptr, nullptr },
+        { TEXT("variables"),     TEXT("array"),  false, TEXT("Batch: array of variable objects"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sEditVarParams[] = {
+        { TEXT("name"),          TEXT("string"), true,  TEXT("Variable name to edit"), nullptr, nullptr },
+        { TEXT("var_type"),      TEXT("string"), false, TEXT("New variable type"), nullptr, nullptr },
+        { TEXT("new_name"),      TEXT("string"), false, TEXT("New name for rename"), nullptr, nullptr },
+        { TEXT("default_value"), TEXT("string"), false, TEXT("New default value"), nullptr, nullptr },
+        { TEXT("category"),      TEXT("string"), false, TEXT("New category"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sAddFuncParams[] = {
+        { TEXT("name"),    TEXT("string"),  true,  TEXT("Function name"), nullptr, TEXT("CalculateDamage") },
+        { TEXT("inputs"),  TEXT("array"),   false, TEXT("Input pins [{name, type}]"), nullptr, nullptr },
+        { TEXT("outputs"), TEXT("array"),   false, TEXT("Output pins [{name, type}]"), nullptr, nullptr },
+        { TEXT("pure"),    TEXT("boolean"), false, TEXT("Mark as pure (no exec pins). Default: false"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sAddCompParams[] = {
+        { TEXT("component_class"), TEXT("string"), true,  TEXT("Component class name"), nullptr, TEXT("StaticMeshComponent") },
+        { TEXT("name"),            TEXT("string"), false, TEXT("Component name"), nullptr, nullptr },
+        { TEXT("parent"),          TEXT("string"), false, TEXT("Parent component name for hierarchy"), nullptr, nullptr },
+        { TEXT("properties"),      TEXT("object"), false, TEXT("Reflection properties {PropName:value}"), nullptr, nullptr },
+        { TEXT("components"),      TEXT("array"),  false, TEXT("Batch: array of component objects"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sEditCompParams[] = {
+        { TEXT("name"),       TEXT("string"), true,  TEXT("Component name to edit"), nullptr, nullptr },
+        { TEXT("properties"), TEXT("object"), true,  TEXT("Reflection properties {PropName:value}"), nullptr, nullptr },
+    };
+
+    static const FMCPActionHelp sGraphActions[] = {
+        { TEXT("add_node"),       TEXT("Add a node to a Blueprint graph or Material expression graph"), sAddNodeParams, UE_ARRAY_COUNT(sAddNodeParams), nullptr },
+        { TEXT("edit_node"),      TEXT("Edit properties or pin defaults of an existing node"), sEditNodeParams, UE_ARRAY_COUNT(sEditNodeParams), nullptr },
+        { TEXT("connect"),        TEXT("Connect pins between two nodes"), sConnectParams, UE_ARRAY_COUNT(sConnectParams), nullptr },
+        { TEXT("disconnect"),     TEXT("Disconnect pins between two nodes"), sConnectParams, UE_ARRAY_COUNT(sConnectParams), nullptr },
+        { TEXT("add_variable"),   TEXT("Add a variable to a Blueprint"), sAddVarParams, UE_ARRAY_COUNT(sAddVarParams), nullptr },
+        { TEXT("edit_variable"),  TEXT("Rename, retype, or recategorize a Blueprint variable"), sEditVarParams, UE_ARRAY_COUNT(sEditVarParams), nullptr },
+        { TEXT("add_function"),   TEXT("Add a function graph to a Blueprint"), sAddFuncParams, UE_ARRAY_COUNT(sAddFuncParams), nullptr },
+        { TEXT("add_component"),  TEXT("Add a component to a Blueprint"), sAddCompParams, UE_ARRAY_COUNT(sAddCompParams), nullptr },
+        { TEXT("edit_component"), TEXT("Edit properties of a Blueprint component"), sEditCompParams, UE_ARRAY_COUNT(sEditCompParams), nullptr },
+        { TEXT("compile"),        TEXT("Compile a Blueprint or recompile a Material"), nullptr, 0, nullptr },
+    };
+
+    static const FMCPToolHelpData sGraphHelp = {
+        TEXT("graph"),
+        TEXT("Edit Blueprint graphs and Material node graphs: add/edit nodes, connect/disconnect pins, manage variables, functions, and components"),
+        TEXT("action"),
+        sGraphActions, UE_ARRAY_COUNT(sGraphActions),
+        sGraphCommonParams, UE_ARRAY_COUNT(sGraphCommonParams)
+    };
+
+    // -------------------------------------------------------------------------
     // Helpers
     // -------------------------------------------------------------------------
+
+    /**
+     * Validate a single connection array item: must be a JSON object with "source" and "dest" keys.
+     * On failure, appends a descriptive error and returns false.
+     */
+    static bool ParseConnectionItem(
+        int32 ConnIdx,
+        const TSharedPtr<FJsonValue>& Item,
+        TArray<FString>& Errors,
+        TSharedPtr<FJsonObject>& OutConnParams,
+        const TSharedPtr<FJsonObject>*& OutSourceObj,
+        const TSharedPtr<FJsonObject>*& OutDestObj)
+    {
+        if (Item->Type != EJson::Object || !(OutConnParams = Item->AsObject()).IsValid())
+        {
+            Errors.Add(FString::Printf(TEXT("Connection %d: item is not a valid JSON object"), ConnIdx));
+            return false;
+        }
+
+        bool bHasSource = OutConnParams->TryGetObjectField(TEXT("source"), OutSourceObj);
+        bool bHasDest = OutConnParams->TryGetObjectField(TEXT("dest"), OutDestObj);
+        if (!bHasSource || !bHasDest)
+        {
+            TArray<FString> Missing;
+            if (!bHasSource) Missing.Add(TEXT("'source'"));
+            if (!bHasDest) Missing.Add(TEXT("'dest'"));
+            TArray<FString> FoundKeys;
+            for (const auto& Pair : OutConnParams->Values) FoundKeys.Add(FString::Printf(TEXT("'%s'"), *Pair.Key));
+            Errors.Add(FString::Printf(TEXT("Connection %d: missing required key(s) %s. Found keys: %s. Expected: {\"source\":{\"node\":\"GUID\",\"pin\":\"Name\"}, \"dest\":{\"node\":\"GUID\",\"pin\":\"Name\"}}"),
+                ConnIdx, *FString::Join(Missing, TEXT(", ")), *FString::Join(FoundKeys, TEXT(", "))));
+            return false;
+        }
+        return true;
+    }
 
     TArray<TSharedPtr<FJsonValue>> MakePinListJson(UEdGraphNode* Node)
     {
@@ -279,15 +408,14 @@ namespace
         FString NodeClass;
         NodeParams->TryGetStringField(TEXT("node_class"), NodeClass);
 
-        int32 PosX = 0, PosY = 0;
-        const TArray<TSharedPtr<FJsonValue>>* PosArr = nullptr;
-        if (!NodeParams->TryGetArrayField(TEXT("pos"), PosArr) || PosArr->Num() < 2)
+        double PosXd = 0, PosYd = 0;
+        if (!NodeParams->TryGetNumberField(TEXT("pos_x"), PosXd) || !NodeParams->TryGetNumberField(TEXT("pos_y"), PosYd))
         {
-            OutError = TEXT("'pos' is required for add_node and must be an array of at least 2 numbers [x, y]");
+            OutError = TEXT("'pos_x' and 'pos_y' are required for add_node");
             return nullptr;
         }
-        PosX = (int32)(*PosArr)[0]->AsNumber();
-        PosY = (int32)(*PosArr)[1]->AsNumber();
+        int32 PosX = (int32)PosXd;
+        int32 PosY = (int32)PosYd;
 
         UEdGraphNode* NewNode = nullptr;
 
@@ -612,11 +740,19 @@ namespace
         if (Blueprint)
         {
             FString GraphName;
-            Params->TryGetStringField(TEXT("graph"), GraphName);
+            if (!Params->TryGetStringField(TEXT("graph"), GraphName))
+                Params->TryGetStringField(TEXT("graph_name"), GraphName);
             UEdGraph* Graph = FMCPGraphHelpers::FindGraphByName(Blueprint, GraphName);
             if (!Graph)
             {
-                return FMCPToolResult::Error(FString::Printf(TEXT("Graph '%s' not found"), *GraphName));
+                TArray<FString> AvailableGraphs;
+                for (UEdGraph* G : Blueprint->UbergraphPages)
+                    if (G) AvailableGraphs.Add(G->GetName());
+                for (UEdGraph* G : Blueprint->FunctionGraphs)
+                    if (G) AvailableGraphs.Add(G->GetName());
+                return FMCPToolResult::Error(FString::Printf(
+                    TEXT("Graph '%s' not found. Available: %s"),
+                    *GraphName, *FString::Join(AvailableGraphs, TEXT(", "))));
             }
 
             FScopedTransaction Transaction(LOCTEXT("MCPAddNode", "MCP Add Blueprint Node"));
@@ -676,17 +812,16 @@ namespace
                 FString NodeClass;
                 NodeParams->TryGetStringField(TEXT("node_class"), NodeClass);
 
-                int32 PosX = 0, PosY = 0;
-                const TArray<TSharedPtr<FJsonValue>>* PosArr = nullptr;
-                if (!NodeParams->TryGetArrayField(TEXT("pos"), PosArr) || PosArr->Num() < 2)
+                double PosXd = 0, PosYd = 0;
+                if (!NodeParams->TryGetNumberField(TEXT("pos_x"), PosXd) || !NodeParams->TryGetNumberField(TEXT("pos_y"), PosYd))
                 {
                     TSharedPtr<FJsonObject> ErrObj = MakeShared<FJsonObject>();
-                    ErrObj->SetStringField(TEXT("error"), TEXT("'pos' is required for add_node and must be an array of at least 2 numbers [x, y]"));
+                    ErrObj->SetStringField(TEXT("error"), TEXT("'pos_x' and 'pos_y' are required for add_node"));
                     Results.Add(MakeShared<FJsonValueObject>(ErrObj));
                     continue;
                 }
-                PosX = (int32)(*PosArr)[0]->AsNumber();
-                PosY = (int32)(*PosArr)[1]->AsNumber();
+                int32 PosX = (int32)PosXd;
+                int32 PosY = (int32)PosYd;
 
                 // Resolve aliases
                 FString ExprClassName = NodeClass;
@@ -823,12 +958,11 @@ namespace
                 Node->Modify();
 
                 // Apply pos shorthand
-                const TArray<TSharedPtr<FJsonValue>>* PosArr = nullptr;
-                if (EditParams->TryGetArrayField(TEXT("pos"), PosArr) && PosArr->Num() >= 2)
-                {
-                    Node->NodePosX = (int32)(*PosArr)[0]->AsNumber();
-                    Node->NodePosY = (int32)(*PosArr)[1]->AsNumber();
-                }
+                double PosXd = 0, PosYd = 0;
+                if (EditParams->TryGetNumberField(TEXT("pos_x"), PosXd))
+                    Node->NodePosX = (int32)PosXd;
+                if (EditParams->TryGetNumberField(TEXT("pos_y"), PosYd))
+                    Node->NodePosY = (int32)PosYd;
 
                 const TSharedPtr<FJsonObject>* PropsObj = nullptr;
                 if (EditParams->TryGetObjectField(TEXT("properties"), PropsObj))
@@ -889,12 +1023,11 @@ namespace
                 Expr->Modify();
 
                 // Apply pos shorthand
-                const TArray<TSharedPtr<FJsonValue>>* PosArr = nullptr;
-                if (EditParams->TryGetArrayField(TEXT("pos"), PosArr) && PosArr->Num() >= 2)
-                {
-                    Expr->MaterialExpressionEditorX = (int32)(*PosArr)[0]->AsNumber();
-                    Expr->MaterialExpressionEditorY = (int32)(*PosArr)[1]->AsNumber();
-                }
+                double PosXd = 0, PosYd = 0;
+                if (EditParams->TryGetNumberField(TEXT("pos_x"), PosXd))
+                    Expr->MaterialExpressionEditorX = (int32)PosXd;
+                if (EditParams->TryGetNumberField(TEXT("pos_y"), PosYd))
+                    Expr->MaterialExpressionEditorY = (int32)PosYd;
 
                 const TSharedPtr<FJsonObject>* PropsObj = nullptr;
                 if (EditParams->TryGetObjectField(TEXT("properties"), PropsObj))
@@ -1001,16 +1134,12 @@ namespace
             FScopedTransaction Transaction(LOCTEXT("MCPConnect", "MCP Connect Blueprint Pins"));
             Blueprint->Modify();
 
-            for (const TSharedPtr<FJsonValue>& Item : ConnItems)
+            for (int32 ConnIdx = 0; ConnIdx < ConnItems.Num(); ++ConnIdx)
             {
-                TSharedPtr<FJsonObject> ConnParams = Item->AsObject();
-                if (!ConnParams.IsValid()) continue;
-
+                TSharedPtr<FJsonObject> ConnParams;
                 const TSharedPtr<FJsonObject>* SourceObj = nullptr;
                 const TSharedPtr<FJsonObject>* DestObj = nullptr;
-                if (!ConnParams->TryGetObjectField(TEXT("source"), SourceObj) ||
-                    !ConnParams->TryGetObjectField(TEXT("dest"), DestObj))
-                    continue;
+                if (!ParseConnectionItem(ConnIdx, ConnItems[ConnIdx], Errors, ConnParams, SourceObj, DestObj)) continue;
 
                 FString SourceNodeGuid, SourcePinName, DestNodeGuid, DestPinName;
                 (*SourceObj)->TryGetStringField(TEXT("node"), SourceNodeGuid);
@@ -1082,16 +1211,39 @@ namespace
             Material->Modify();
             Material->PreEditChange(nullptr);
 
-            for (const TSharedPtr<FJsonValue>& Item : ConnItems)
+            // Shared helper: resolve source pin and connect to a material property
+            auto ConnectToMatProperty = [&](UMaterialExpression* SrcExpr, const FString& SrcNodeGuid,
+                const FString& SrcPinName, EMaterialProperty MatProp, const FString& PropDisplayName)
             {
-                TSharedPtr<FJsonObject> ConnParams = Item->AsObject();
-                if (!ConnParams.IsValid()) continue;
+                int32 SrcOutIdx = FindMatOutputIndex(SrcExpr, SrcPinName);
+                if (SrcOutIdx == INDEX_NONE)
+                {
+                    Errors.Add(FString::Printf(
+                        TEXT("Output pin '%s' not found on %s (%s). Available outputs: %s"),
+                        *SrcPinName, *SrcNodeGuid, *SrcExpr->GetClass()->GetName(),
+                        *ListAvailableOutputs(SrcExpr)));
+                    return;
+                }
+                const FString ResolvedPin = ResolveSourcePinName(SrcExpr, SrcPinName, SrcOutIdx);
+                if (UMaterialEditingLibrary::ConnectMaterialProperty(SrcExpr, ResolvedPin, MatProp))
+                {
+                    Connected.Add(FString::Printf(TEXT("%s -> %s"), *SrcNodeGuid, *PropDisplayName));
+                }
+                else
+                {
+                    Errors.Add(FString::Printf(
+                        TEXT("Failed to connect %s.'%s' to material property '%s' (property may be inactive for this blend mode). Available outputs: %s"),
+                        *SrcNodeGuid, *ResolvedPin, *PropDisplayName,
+                        *ListAvailableOutputs(SrcExpr)));
+                }
+            };
 
+            for (int32 ConnIdx = 0; ConnIdx < ConnItems.Num(); ++ConnIdx)
+            {
+                TSharedPtr<FJsonObject> ConnParams;
                 const TSharedPtr<FJsonObject>* SourceObj = nullptr;
                 const TSharedPtr<FJsonObject>* DestObj = nullptr;
-                if (!ConnParams->TryGetObjectField(TEXT("source"), SourceObj) ||
-                    !ConnParams->TryGetObjectField(TEXT("dest"), DestObj))
-                    continue;
+                if (!ParseConnectionItem(ConnIdx, ConnItems[ConnIdx], Errors, ConnParams, SourceObj, DestObj)) continue;
 
                 FString SourceNodeGuid, SourcePinName;
                 (*SourceObj)->TryGetStringField(TEXT("node"), SourceNodeGuid);
@@ -1115,28 +1267,7 @@ namespace
                         Errors.Add(FString::Printf(TEXT("Unknown material property '%s'"), *MaterialProperty));
                         continue;
                     }
-
-                    int32 SrcOutIdx = FindMatOutputIndex(SourceExpr, SourcePinName);
-                    if (SrcOutIdx == INDEX_NONE)
-                    {
-                        Errors.Add(FString::Printf(
-                            TEXT("Output pin '%s' not found on %s (%s). Available outputs: %s"),
-                            *SourcePinName, *SourceNodeGuid, *SourceExpr->GetClass()->GetName(),
-                            *ListAvailableOutputs(SourceExpr)));
-                        continue;
-                    }
-                    const FString ResolvedSrcPin = ResolveSourcePinName(SourceExpr, SourcePinName, SrcOutIdx);
-                    if (UMaterialEditingLibrary::ConnectMaterialProperty(SourceExpr, ResolvedSrcPin, MatProp))
-                    {
-                        Connected.Add(FString::Printf(TEXT("%s -> %s"), *SourceNodeGuid, *MaterialProperty));
-                    }
-                    else
-                    {
-                        Errors.Add(FString::Printf(
-                            TEXT("Failed to connect %s.'%s' to material property '%s' (property may be inactive for this blend mode). Available outputs: %s"),
-                            *SourceNodeGuid, *ResolvedSrcPin, *MaterialProperty,
-                            *ListAvailableOutputs(SourceExpr)));
-                    }
+                    ConnectToMatProperty(SourceExpr, SourceNodeGuid, SourcePinName, MatProp, MaterialProperty);
                 }
                 else
                 {
@@ -1147,6 +1278,21 @@ namespace
                     UMaterialExpression* DestExpr = FMCPGraphHelpers::FindExpressionByGuid(Material, DestNodeGuid);
                     if (!DestExpr)
                     {
+                        // Auto-resolve: if dest.node is a known alias for the material output node,
+                        // treat dest.pin as a material property
+                        if (FMCPGraphHelpers::IsOutputNodeAlias(DestNodeGuid))
+                        {
+                            EMaterialProperty MatProp;
+                            FString AliasError;
+                            if (!FMCPGraphHelpers::ResolveAliasToMaterialProperty(DestNodeGuid, DestPinName, MatProp, AliasError))
+                            {
+                                Errors.Add(AliasError);
+                                continue;
+                            }
+                            ConnectToMatProperty(SourceExpr, SourceNodeGuid, SourcePinName, MatProp, DestPinName);
+                            continue;
+                        }
+
                         Errors.Add(FString::Printf(TEXT("Dest expression '%s' not found"), *DestNodeGuid));
                         continue;
                     }
@@ -1229,16 +1375,12 @@ namespace
             FScopedTransaction Transaction(LOCTEXT("MCPDisconnect", "MCP Disconnect Blueprint Pins"));
             Blueprint->Modify();
 
-            for (const TSharedPtr<FJsonValue>& Item : ConnItems)
+            for (int32 ConnIdx = 0; ConnIdx < ConnItems.Num(); ++ConnIdx)
             {
-                TSharedPtr<FJsonObject> ConnParams = Item->AsObject();
-                if (!ConnParams.IsValid()) continue;
-
+                TSharedPtr<FJsonObject> ConnParams;
                 const TSharedPtr<FJsonObject>* SourceObj = nullptr;
                 const TSharedPtr<FJsonObject>* DestObj = nullptr;
-                if (!ConnParams->TryGetObjectField(TEXT("source"), SourceObj) ||
-                    !ConnParams->TryGetObjectField(TEXT("dest"), DestObj))
-                    continue;
+                if (!ParseConnectionItem(ConnIdx, ConnItems[ConnIdx], Errors, ConnParams, SourceObj, DestObj)) continue;
 
                 FString SourceNodeGuid, SourcePinName, DestNodeGuid, DestPinName;
                 (*SourceObj)->TryGetStringField(TEXT("node"), SourceNodeGuid);
@@ -1268,6 +1410,10 @@ namespace
                     continue;
                 }
 
+                if (!SourcePin->LinkedTo.Contains(DestPin))
+                {
+                    continue;
+                }
                 SourceNode->Modify();
                 DestNode->Modify();
                 SourcePin->BreakLinkTo(DestPin);
@@ -1289,16 +1435,12 @@ namespace
             Material->Modify();
             Material->PreEditChange(nullptr);
 
-            for (const TSharedPtr<FJsonValue>& Item : ConnItems)
+            for (int32 ConnIdx = 0; ConnIdx < ConnItems.Num(); ++ConnIdx)
             {
-                TSharedPtr<FJsonObject> ConnParams = Item->AsObject();
-                if (!ConnParams.IsValid()) continue;
-
+                TSharedPtr<FJsonObject> ConnParams;
                 const TSharedPtr<FJsonObject>* SourceObj = nullptr;
                 const TSharedPtr<FJsonObject>* DestObj = nullptr;
-                if (!ConnParams->TryGetObjectField(TEXT("source"), SourceObj) ||
-                    !ConnParams->TryGetObjectField(TEXT("dest"), DestObj))
-                    continue;
+                if (!ParseConnectionItem(ConnIdx, ConnItems[ConnIdx], Errors, ConnParams, SourceObj, DestObj)) continue;
 
                 FString SourceNodeGuid;
                 (*SourceObj)->TryGetStringField(TEXT("node"), SourceNodeGuid);
@@ -1347,6 +1489,26 @@ namespace
                     UMaterialExpression* DestExpr = FMCPGraphHelpers::FindExpressionByGuid(Material, DestNodeGuid);
                     if (!DestExpr)
                     {
+                        // Auto-resolve: if dest.node is an output alias, treat dest.pin as material property
+                        if (FMCPGraphHelpers::IsOutputNodeAlias(DestNodeGuid))
+                        {
+                            EMaterialProperty MatProp;
+                            FString AliasError;
+                            if (!FMCPGraphHelpers::ResolveAliasToMaterialProperty(DestNodeGuid, DestPinName, MatProp, AliasError))
+                            {
+                                Errors.Add(AliasError);
+                                continue;
+                            }
+                            FExpressionInput* PropInput = Material->GetExpressionInputForProperty(MatProp);
+                            if (PropInput && PropInput->Expression == SourceExpr)
+                            {
+                                SourceExpr->Modify();
+                                PropInput->Expression = nullptr;
+                                PropInput->OutputIndex = 0;
+                                Disconnected.Add(FString::Printf(TEXT("%s -> %s"), *SourceNodeGuid, *DestPinName));
+                            }
+                            continue;
+                        }
                         Errors.Add(FString::Printf(TEXT("Dest expression '%s' not found"), *DestNodeGuid));
                         continue;
                     }
@@ -1412,6 +1574,7 @@ namespace
         }
 
         TArray<FString> Added;
+        TArray<FString> Errors;
         FScopedTransaction Transaction(LOCTEXT("MCPAddVariable", "MCP Add Blueprint Variable"));
         Blueprint->Modify();
 
@@ -1427,19 +1590,30 @@ namespace
             VarParams->TryGetStringField(TEXT("default_value"), DefaultValue);
             VarParams->TryGetStringField(TEXT("category"), Category);
 
-            if (Name.IsEmpty() || TypeStr.IsEmpty()) continue;
+            if (Name.IsEmpty() || TypeStr.IsEmpty())
+            {
+                Errors.Add(FString::Printf(TEXT("Variable requires 'name' and 'var_type' (got name='%s', var_type='%s')"), *Name, *TypeStr));
+                continue;
+            }
 
             FEdGraphPinType PinType;
-            if (!ParseVarType(TypeStr, PinType)) continue;
-
-            if (FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*Name), PinType, DefaultValue))
+            if (!ParseVarType(TypeStr, PinType))
             {
-                if (!Category.IsEmpty())
-                {
-                    FBlueprintEditorUtils::SetBlueprintVariableCategory(Blueprint, FName(*Name), nullptr, FText::FromString(Category));
-                }
-                Added.Add(Name);
+                Errors.Add(FString::Printf(TEXT("Invalid var_type '%s' for variable '%s'. Valid: float, int, int64, bool, string, name, text, byte, Vector, Rotator, Transform, Object:ClassName"), *TypeStr, *Name));
+                continue;
             }
+
+            if (!FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*Name), PinType, DefaultValue))
+            {
+                Errors.Add(FString::Printf(TEXT("Failed to add variable '%s' (may already exist)"), *Name));
+                continue;
+            }
+
+            if (!Category.IsEmpty())
+            {
+                FBlueprintEditorUtils::SetBlueprintVariableCategory(Blueprint, FName(*Name), nullptr, FText::FromString(Category));
+            }
+            Added.Add(Name);
         }
 
         FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
@@ -1448,6 +1622,8 @@ namespace
         TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
         Result->SetArrayField(TEXT("added"), FMCPJsonHelpers::ArrayFromStrings(Added));
         Result->SetNumberField(TEXT("count"), Added.Num());
+        if (Errors.Num() > 0)
+            Result->SetArrayField(TEXT("errors"), FMCPJsonHelpers::ArrayFromStrings(Errors));
         return FMCPJsonHelpers::SuccessResponse(Result);
     }
 
@@ -1785,61 +1961,69 @@ FMCPToolInfo FMCPTool_Graph::GetToolInfo() const
     FMCPToolInfo Info;
     Info.Name        = TEXT("graph");
     Info.Description = TEXT("Edit Blueprint graphs and Material node graphs: add/edit nodes, connect/disconnect pins, manage variables, functions, and components");
+
+    FString PropNames;
+    for (const auto& Entry : FMCPGraphHelpers::KnownMaterialProperties())
+    {
+        if (PropNames.Len() > 0) PropNames += TEXT(", ");
+        PropNames += Entry.Name;
+    }
+    FString DestDesc = FString::Printf(
+        TEXT("[connect|disconnect] Input pin: {\"node\":\"GUID\",\"pin\":\"PinName\"}. Material output (no GUID): {\"property\":\"PropName\"} — or use alias dest.node (Output/Result/Material) with dest.pin as property name. Valid properties: %s"),
+        *PropNames);
+
     Info.Parameters  = {
         { TEXT("action"),          TEXT("Values: add_node|edit_node|connect|disconnect|add_variable|edit_variable|add_function|add_component|edit_component|compile|help"), TEXT("string"), true  },
         { TEXT("target"),          TEXT("Blueprint or Material asset path"),                                                      TEXT("string"), true  },
-        { TEXT("graph"),           TEXT("[add_node|edit_node|connect|disconnect] Graph name (BP only). Default: EventGraph"),    TEXT("string"), false },
+        { TEXT("graph"),           TEXT("[add_node|edit_node|connect|disconnect] Graph name (BP only). Default: EventGraph. Alias: graph_name"),    TEXT("string"), false },
         { TEXT("node_class"),      TEXT("[add_node] BP node type: CallFunction (requires function param), Event, CustomEvent, VariableGet, VariableSet, Branch, Sequence, Self, DynamicCast, SpawnActor, MakeArray, Select, SwitchOnInt, SwitchOnString, SwitchOnEnum, MacroInstance, ForEachLoop. For Materials: expression class name e.g. Multiply, Add, Lerp, ScalarParameter, VectorParameter, TextureCoordinate, Constant"), TEXT("string"), false },
         { TEXT("function"),        TEXT("[add_node] Function name for CallFunction nodes"),                                        TEXT("string"), false },
         { TEXT("function_owner"),  TEXT("[add_node] Class owning the function (e.g. KismetSystemLibrary); also used as cast target class for DynamicCast"), TEXT("string"), false },
         { TEXT("event_name"),      TEXT("[add_node] Event name for Event/CustomEvent nodes; macro name for MacroInstance"),        TEXT("string"), false },
         { TEXT("variable_name"),   TEXT("[add_node] Variable name for VariableGet/VariableSet nodes"),                            TEXT("string"), false },
-        { TEXT("pos"),             TEXT("[add_node] Node position as flat array [x, y]"),                                          TEXT("array"),  false, TEXT("number") },
-        { TEXT("nodes"),           TEXT("[add_node] Batch: array of node objects"),                                               TEXT("array"),  false, TEXT("object") },
+        { TEXT("pos_x"),           TEXT("[add_node|edit_node] Node X position"),                                                    TEXT("integer"), false },
+        { TEXT("pos_y"),           TEXT("[add_node|edit_node] Node Y position"),                                                    TEXT("integer"), false },
+        { TEXT("nodes"),           TEXT("[add_node] Batch: array of node objects. Each: {node_class, function?, function_owner?, event_name?, variable_name?, pos_x?, pos_y?}"), TEXT("array"),  false, TEXT("object") },
         { TEXT("node"),            TEXT("[edit_node] Node GUID to edit"),                                                         TEXT("string"), false },
         { TEXT("properties"),      TEXT("[edit_node|edit_component] Reflection properties. Format: {\"PropName\":value}"),          TEXT("object"), false },
         { TEXT("pin_defaults"),    TEXT("[edit_node] Pin default values. Format: {\"PinName\":\"value\"}"),                          TEXT("object"), false },
-        { TEXT("edits"),           TEXT("[edit_node] Batch: array of edit objects"),                                              TEXT("array"),  false, TEXT("object") },
+        { TEXT("edits"),           TEXT("[edit_node] Batch: array of edit objects. Each: {node (GUID), properties?, pin_defaults?, pos_x?, pos_y?}"), TEXT("array"),  false, TEXT("object") },
         { TEXT("source"),          TEXT("[connect|disconnect] Output pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"}. Use inspect(target='Path::GUID',type='pins') for names"), TEXT("object"), false },
-        { TEXT("dest"),            TEXT("[connect|disconnect] Input pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"} or {\"property\":\"MaterialProperty\"}"), TEXT("object"), false },
-        { TEXT("connections"),     TEXT("[connect/disconnect] Batch: array of connection objects"),                               TEXT("array"),  false, TEXT("object") },
+        { TEXT("dest"),            DestDesc, TEXT("object"), false },
+        { TEXT("connections"),     TEXT("[connect|disconnect] Batch array. Each: {source:{node,pin}, dest:{node,pin}} or {source:{node,pin}, dest:{property:\"PropName\"}} for material output. BP example: [{\"source\":{\"node\":\"AA\",\"pin\":\"ReturnValue\"},\"dest\":{\"node\":\"AQ\",\"pin\":\"A\"}}], Material: [{\"source\":{\"node\":\"AB\",\"pin\":\"\"},\"dest\":{\"property\":\"BaseColor\"}}]"), TEXT("array"),  false, TEXT("object") },
         { TEXT("name"),            TEXT("[add_variable/edit_variable/add_function/add_component/edit_component] Name (alias: var_name for add_variable)"),           TEXT("string"), false },
         { TEXT("var_type"),        TEXT("[add_variable|edit_variable] Values: float|int|bool|string|byte|name|text|Vector|Rotator|Transform|Object:ClassName"), TEXT("string"), false },
         { TEXT("default_value"),   TEXT("[add_variable/edit_variable] Default value as string"),                                  TEXT("string"), false },
         { TEXT("category"),        TEXT("[add_variable/edit_variable] Variable category"),                                        TEXT("string"), false },
-        { TEXT("variables"),       TEXT("[add_variable] Batch: array of variable objects"),                                       TEXT("array"),  false, TEXT("object") },
+        { TEXT("variables"),       TEXT("[add_variable] Batch: array of variable objects. Each: {name, var_type, default_value?, category?}"), TEXT("array"),  false, TEXT("object") },
         { TEXT("new_name"),        TEXT("[edit_variable] New name for rename"),                                                   TEXT("string"), false },
         { TEXT("inputs"),          TEXT("[add_function] Input pins. Format: [{\"name\":\"x\",\"type\":\"float\"}]"),                          TEXT("array"),  false, TEXT("object") },
         { TEXT("outputs"),         TEXT("[add_function] Output pins. Format: [{\"name\":\"result\",\"type\":\"bool\"}]"),                  TEXT("array"),  false, TEXT("object") },
         { TEXT("pure"),            TEXT("[add_function] Mark as pure (no exec pins). Default: false"),                            TEXT("boolean"),false },
         { TEXT("component_class"), TEXT("[add_component] Component class name (e.g. StaticMeshComponent)"),                      TEXT("string"), false },
         { TEXT("parent"),          TEXT("[add_component] Parent component name for hierarchy"),                                   TEXT("string"), false },
-        { TEXT("components"),      TEXT("[add_component] Batch: array of component objects"),                                     TEXT("array"),  false, TEXT("object") },
+        { TEXT("components"),      TEXT("[add_component] Batch: array of component objects. Each: {component_class, name?, parent?, properties?}"), TEXT("array"),  false, TEXT("object") },
+        { TEXT("help"),            TEXT("Pass help=true for overview, help='action_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Graph::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sGraphHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Action, Target;
         if (!Params->TryGetStringField(TEXT("action"), Action))
             return FMCPToolResult::Error(TEXT("'action' is required"));
 
+        // Backward compat: action=help redirects to the help system
         if (Action.Equals(TEXT("help"), ESearchCase::IgnoreCase))
         {
-            TArray<TSharedPtr<FJsonValue>> ActionsArray;
-            for (const FGraphActionInfo& A : GGraphActions)
-            {
-                TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
-                Obj->SetStringField(TEXT("name"), A.Name);
-                Obj->SetStringField(TEXT("description"), A.Desc);
-                ActionsArray.Add(MakeShared<FJsonValueObject>(Obj));
-            }
-            TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-            Result->SetArrayField(TEXT("actions"), ActionsArray);
-            return FMCPJsonHelpers::SuccessResponse(Result);
+            return MCPToolHelp::FormatHelp(sGraphHelp, TEXT(""));
         }
 
         if (!Params->TryGetStringField(TEXT("target"), Target))

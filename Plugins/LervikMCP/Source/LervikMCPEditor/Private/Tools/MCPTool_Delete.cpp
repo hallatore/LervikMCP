@@ -2,6 +2,7 @@
 #include "MCPGameThreadHelper.h"
 #include "MCPGraphHelpers.h"
 #include "MCPJsonHelpers.h"
+#include "MCPToolHelp.h"
 #include "MCPObjectResolver.h"
 
 #include "ScopedTransaction.h"
@@ -55,6 +56,65 @@ namespace
         return Targets;
     }
 
+    // ── Help data ────────────────────────────────────────────────────────
+
+    static const FMCPParamHelp sDeleteAssetParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Asset path(s) to delete"), nullptr, TEXT("/Game/BP_OldActor") },
+    };
+
+    static const FMCPParamHelp sDeleteActorParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Actor label(s) to delete"), nullptr, TEXT("PointLight_0") },
+    };
+
+    static const FMCPParamHelp sDeleteNodeParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Node GUID(s) to delete"), nullptr, nullptr },
+        { TEXT("parent"), TEXT("string"), true, TEXT("Owning Blueprint or Material path"), nullptr, TEXT("/Game/BP_MyActor") },
+        { TEXT("graph"),  TEXT("string"), false, TEXT("Graph name. Default: EventGraph"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sDeleteVarParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Variable name(s) to delete"), nullptr, nullptr },
+        { TEXT("parent"), TEXT("string"), true, TEXT("Owning Blueprint path"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sDeleteExprParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Expression GUID(s) to delete"), nullptr, nullptr },
+        { TEXT("parent"), TEXT("string"), true, TEXT("Owning Material path"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sDeleteCompParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Component name(s) to delete"), nullptr, nullptr },
+        { TEXT("parent"), TEXT("string"), true, TEXT("Owning Blueprint path"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sDeleteConnParams[] = {
+        { TEXT("parent"),     TEXT("string"), true, TEXT("Owning Blueprint or Material path"), nullptr, nullptr },
+        { TEXT("pin_source"), TEXT("object"), true, TEXT("Output pin {\"node\":\"GUID\",\"pin\":\"PinName\"}"), nullptr, nullptr },
+        { TEXT("pin_dest"),   TEXT("object"), true, TEXT("Input pin {\"node\":\"GUID\",\"pin\":\"PinName\"}"), nullptr, nullptr },
+    };
+
+    static const FMCPParamHelp sDeleteFolderParams[] = {
+        { TEXT("target"), TEXT("string|array"), true, TEXT("Content Browser folder path(s)"), nullptr, TEXT("/Game/OldFolder") },
+    };
+
+    static const FMCPActionHelp sDeleteActions[] = {
+        { TEXT("asset"),      TEXT("Delete asset(s) from Content Browser"), sDeleteAssetParams, UE_ARRAY_COUNT(sDeleteAssetParams), nullptr },
+        { TEXT("actor"),      TEXT("Delete actor(s) from the level"), sDeleteActorParams, UE_ARRAY_COUNT(sDeleteActorParams), nullptr },
+        { TEXT("node"),       TEXT("Delete Blueprint graph node(s)"), sDeleteNodeParams, UE_ARRAY_COUNT(sDeleteNodeParams), nullptr },
+        { TEXT("variable"),   TEXT("Delete Blueprint variable(s)"), sDeleteVarParams, UE_ARRAY_COUNT(sDeleteVarParams), nullptr },
+        { TEXT("expression"), TEXT("Delete Material expression(s)"), sDeleteExprParams, UE_ARRAY_COUNT(sDeleteExprParams), nullptr },
+        { TEXT("component"),  TEXT("Delete Blueprint component(s)"), sDeleteCompParams, UE_ARRAY_COUNT(sDeleteCompParams), nullptr },
+        { TEXT("connection"), TEXT("Disconnect a specific pin connection"), sDeleteConnParams, UE_ARRAY_COUNT(sDeleteConnParams), nullptr },
+        { TEXT("folder"),     TEXT("Delete Content Browser folder(s)"), sDeleteFolderParams, UE_ARRAY_COUNT(sDeleteFolderParams), nullptr },
+    };
+
+    static const FMCPToolHelpData sDeleteHelp = {
+        TEXT("delete"),
+        TEXT("Delete assets, actors, or Blueprint/material elements"),
+        TEXT("type"),
+        sDeleteActions, UE_ARRAY_COUNT(sDeleteActions),
+        nullptr, 0
+    };
 }
 
 FMCPToolInfo FMCPTool_Delete::GetToolInfo() const
@@ -69,12 +129,17 @@ FMCPToolInfo FMCPTool_Delete::GetToolInfo() const
         { TEXT("graph"),      TEXT("[node] Graph name. Default: EventGraph"),                                              TEXT("string"),       false },
         { TEXT("pin_source"), TEXT("[connection] Output pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"}"),              TEXT("object"),       false },
         { TEXT("pin_dest"),   TEXT("[connection] Input pin. Format: {\"node\":\"GUID\",\"pin\":\"PinName\"}"),               TEXT("object"),       false },
+        { TEXT("help"),       TEXT("Pass help=true for overview, help='type_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
 }
 
 FMCPToolResult FMCPTool_Delete::Execute(const TSharedPtr<FJsonObject>& Params)
 {
+    FMCPToolResult HelpResult;
+    if (MCPToolHelp::CheckAndHandleHelp(Params, sDeleteHelp, HelpResult))
+        return HelpResult;
+
     return ExecuteOnGameThread([Params]() -> FMCPToolResult
     {
         FString Type;
