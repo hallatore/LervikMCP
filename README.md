@@ -1,5 +1,10 @@
 # LervikMCP - UE5 MCP Plugin
 
+<p align="center">
+  <a href="https://discord.gg/sX48CssHWM"><img src="https://img.shields.io/discord/1279047221362294964?label=Discord&logo=discord&logoColor=white&color=5865F2&style=for-the-badge" alt="Discord"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/badge/License-MIT-blue.svg?style=for-the-badge" alt="MIT License"></a>
+</p>
+
 LervikMCP is an MCP plugin for Unreal Engine 5. It allows you to interface and work with the editor in new ways! It's an experimental project exploring how LLMs can interact with the UE5 Editor.
 
 ## Examples - What can it do?
