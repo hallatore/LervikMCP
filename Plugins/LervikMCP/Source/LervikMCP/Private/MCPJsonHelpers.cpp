@@ -168,7 +168,15 @@ bool FMCPJsonHelpers::JsonValueToPropertyString(const TSharedPtr<FJsonValue>& Va
     const TSharedPtr<FJsonObject>* AsObj = nullptr;
     if (Value->TryGetObject(AsObj))
     {
-        OutStr = JsonObjToString(*AsObj);
+        FString Parts;
+        for (const auto& Pair : (*AsObj)->Values)
+        {
+            if (!Parts.IsEmpty()) Parts += TEXT(",");
+            FString SubStr;
+            FMCPJsonHelpers::JsonValueToPropertyString(Pair.Value, SubStr);
+            Parts += Pair.Key + TEXT("=") + SubStr;
+        }
+        OutStr = TEXT("(") + Parts + TEXT(")");
         return true;
     }
 

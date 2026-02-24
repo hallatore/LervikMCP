@@ -5,6 +5,8 @@
 #include "Materials/MaterialExpression.h"
 #include "Materials/Material.h"
 #include "MaterialExpressionIO.h"
+#include "MCPGraphHelpers.h"
+#include "MCPJsonHelpers.h"
 
 BEGIN_DEFINE_SPEC(FMCPTool_InspectDirectSpec, "Plugins.LervikMCP.Integration.Tools.Inspect.Direct",
 	EAutomationTestFlags::EditorContext | EAutomationTestFlags::ProductFilter)
@@ -31,6 +33,27 @@ void FMCPTool_InspectDirectSpec::Define()
 		It("inspect tool is registered", [this]()
 		{
 			TestNotNull("inspect tool found", InspectTool);
+		});
+	});
+
+	Describe("missing type parameter", [this]()
+	{
+		It("returns error when type is not provided", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			AActor* Actor = Helper.SpawnTransientActor(AActor::StaticClass());
+			if (!TestNotNull("actor spawned", Actor)) return;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), Actor->GetActorLabel() }
+				})
+			);
+
+			TestTrue("result is an error", Result.bIsError);
+			TestTrue("error mentions 'type'",
+				Result.Content.Contains(TEXT("type")));
 		});
 	});
 
@@ -673,6 +696,163 @@ void FMCPTool_InspectDirectSpec::Define()
 
 			const TArray<TSharedPtr<FJsonValue>>* Components = nullptr;
 			TestTrue("result has 'components' array", Json->TryGetArrayField(TEXT("components"), Components));
+		});
+	});
+
+	Describe("type=hlsl dangling nodes", [this]()
+	{
+		It("includes unconnected expressions in Dangling section", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslDangling"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			// Connected constant -> BaseColor
+			auto* Connected = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("connected expr", Connected)) return;
+			Connected->R = 0.5f;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = Connected;
+			BaseColorInput->OutputIndex = 0;
+
+			// Dangling constant (not connected)
+			auto* Dangling = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("dangling expr", Dangling)) return;
+			Dangling->R = 0.99f;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+			TestTrue("contains Dangling section header",
+				Result.Content.Contains(TEXT("Dangling")));
+			TestTrue("contains dangling constant value 0.99",
+				Result.Content.Contains(TEXT("0.99")));
+		});
+
+		It("does not emit Dangling section when all nodes are connected", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslAllConnected"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			auto* C = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("expr", C)) return;
+			C->R = 1.0f;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = C;
+			BaseColorInput->OutputIndex = 0;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+			TestFalse("no Dangling section",
+				Result.Content.Contains(TEXT("Dangling")));
+		});
+
+		It("dangling node referencing connected node emits connected var name", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslDanglingCrossRef"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			// Connected constant -> BaseColor
+			auto* ConnectedConst = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("connected const", ConnectedConst)) return;
+			ConnectedConst->R = 0.5f;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = ConnectedConst;
+			BaseColorInput->OutputIndex = 0;
+
+			// Dangling Add node: input A = ConnectedConst, input B = new dangling constant
+			auto* DanglingAdd = Cast<UMaterialExpressionAdd>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionAdd::StaticClass()));
+			if (!TestNotNull("dangling add", DanglingAdd)) return;
+
+			auto* DanglingConst = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("dangling const", DanglingConst)) return;
+			DanglingConst->R = 0.77f;
+
+			// Wire: DanglingAdd.A = ConnectedConst, DanglingAdd.B = DanglingConst
+			FExpressionInput* AddInputA = FMCPGraphHelpers::GetExpressionInput(DanglingAdd, 0);
+			if (!TestNotNull("add input A", AddInputA)) return;
+			AddInputA->Expression = ConnectedConst;
+			AddInputA->OutputIndex = 0;
+
+			FExpressionInput* AddInputB = FMCPGraphHelpers::GetExpressionInput(DanglingAdd, 1);
+			if (!TestNotNull("add input B", AddInputB)) return;
+			AddInputB->Expression = DanglingConst;
+			AddInputB->OutputIndex = 0;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			FString ConnectedVarName = FString::Printf(TEXT("Constant_%s"),
+				*FMCPJsonHelpers::GuidToCompact(ConnectedConst->MaterialExpressionGuid));
+
+			TestTrue("dangling section references connected var name",
+				Result.Content.Contains(ConnectedVarName));
+
+			FString AddVarName = FString::Printf(TEXT("Add_%s"),
+				*FMCPJsonHelpers::GuidToCompact(DanglingAdd->MaterialExpressionGuid));
+			FString ExpectedAddLine = FString::Printf(TEXT("auto %s = %s + "), *AddVarName, *ConnectedVarName);
+			TestTrue("Add expression references connected constant by var name",
+				Result.Content.Contains(ExpectedAddLine));
+		});
+
+		It("emits dangling nodes even when no nodes are connected to outputs", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslOnlyDangling"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			auto* D = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("expr", D)) return;
+			D->R = 0.42f;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+			TestTrue("contains Dangling section",
+				Result.Content.Contains(TEXT("Dangling")));
+			TestTrue("contains dangling value 0.42",
+				Result.Content.Contains(TEXT("0.42")));
 		});
 	});
 }

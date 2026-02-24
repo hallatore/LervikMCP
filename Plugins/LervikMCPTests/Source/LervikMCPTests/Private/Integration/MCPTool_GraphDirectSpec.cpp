@@ -5,6 +5,7 @@
 #include "Materials/MaterialExpressionAdd.h"
 #include "Materials/MaterialExpressionSine.h"
 #include "Materials/MaterialExpressionConstant3Vector.h"
+#include "Materials/MaterialExpressionVectorParameter.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 
@@ -1716,6 +1717,207 @@ void FMCPTool_GraphDirectSpec::Define()
 			const TArray<TSharedPtr<FJsonValue>>* Errors = nullptr;
 			TestTrue("has errors array", Json->TryGetArrayField(TEXT("errors"), Errors));
 			if (Errors) TestTrue("errors array is not empty", Errors->Num() > 0);
+		});
+	});
+
+	Describe("material edit_node struct DefaultValue", [this]()
+	{
+		It("sets FLinearColor DefaultValue on VectorParameter via JSON object", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeStructColor"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionVectorParameter::StaticClass());
+			if (!TestNotNull("VectorParameter created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Pass DefaultValue as a JSON object {R, G, B, A} — this was the original bug
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"DefaultValue":{"R":1.0,"G":0.5,"B":0.25,"A":1.0}}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Modified = nullptr;
+			TestTrue("has modified array", Json->TryGetArrayField(TEXT("modified"), Modified));
+			if (Modified) TestTrue("modified count > 0", Modified->Num() > 0);
+
+			// Verify the actual struct value was applied
+			UMaterialExpressionVectorParameter* VecParam = Cast<UMaterialExpressionVectorParameter>(Expr);
+			if (TestNotNull("cast to VectorParameter", VecParam))
+			{
+				TestTrue("R is ~1.0", FMath::IsNearlyEqual(VecParam->DefaultValue.R, 1.0f, 0.001f));
+				TestTrue("G is ~0.5", FMath::IsNearlyEqual(VecParam->DefaultValue.G, 0.5f, 0.001f));
+				TestTrue("B is ~0.25", FMath::IsNearlyEqual(VecParam->DefaultValue.B, 0.25f, 0.001f));
+				TestTrue("A is ~1.0", FMath::IsNearlyEqual(VecParam->DefaultValue.A, 1.0f, 0.001f));
+			}
+
+			// Verify no warnings in response
+			const TArray<TSharedPtr<FJsonValue>>* Warnings = nullptr;
+			bool bHasWarnings = Json->TryGetArrayField(TEXT("warnings"), Warnings);
+			if (bHasWarnings && Warnings) TestEqual("no warnings", Warnings->Num(), 0);
+		});
+
+		It("reports warning when struct DefaultValue has invalid format", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeStructInvalid"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionVectorParameter::StaticClass());
+			if (!TestNotNull("VectorParameter created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Pass DefaultValue as a plain string that cannot be parsed as FLinearColor
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"DefaultValue":"not_a_color"}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not a hard error (soft warning expected)", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Warnings = nullptr;
+			TestTrue("has warnings array", Json->TryGetArrayField(TEXT("warnings"), Warnings));
+			if (Warnings && TestTrue("at least one warning", Warnings->Num() > 0))
+			{
+				FString FirstWarning = (*Warnings)[0]->AsString();
+				TestTrue("warning mentions property name", FirstWarning.Contains(TEXT("DefaultValue")));
+				TestTrue("warning mentions failure", FirstWarning.Contains(TEXT("Failed to set")));
+			}
+		});
+
+		It("also sets ParameterName alongside struct DefaultValue", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodeStructMultiProp"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionVectorParameter::StaticClass());
+			if (!TestNotNull("VectorParameter created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Set both ParameterName (string) and DefaultValue (struct) in one call
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"ParameterName":"MyColor","DefaultValue":{"R":0.0,"G":1.0,"B":0.0,"A":1.0}}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			UMaterialExpressionVectorParameter* VecParam = Cast<UMaterialExpressionVectorParameter>(Expr);
+			if (TestNotNull("cast to VectorParameter", VecParam))
+			{
+				TestEqual("ParameterName is MyColor", VecParam->ParameterName.ToString(), FString(TEXT("MyColor")));
+				TestTrue("G is ~1.0", FMath::IsNearlyEqual(VecParam->DefaultValue.G, 1.0f, 0.001f));
+			}
+		});
+
+		It("sets partial FLinearColor keys, preserves unspecified", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestEditNodePartialColor"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			UMaterialExpression* Expr = Helper.AddMaterialExpression(
+				Mat, UMaterialExpressionVectorParameter::StaticClass());
+			if (!TestNotNull("VectorParameter created", Expr)) return;
+
+			FString GuidStr = Expr->MaterialExpressionGuid.ToString(EGuidFormats::DigitsWithHyphens);
+
+			// Pre-set to non-zero so we can verify partial import preserves unspecified keys
+			UMaterialExpressionVectorParameter* PreVec = CastChecked<UMaterialExpressionVectorParameter>(Expr);
+			PreVec->DefaultValue = FLinearColor(0.8f, 0.8f, 0.8f, 0.8f);
+
+			// Only specify R — omit G, B, A (common LLM caller edge case)
+			TSharedPtr<FJsonObject> Params = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"DefaultValue":{"R":1.0}}})"),
+					*FMCPToolDirectTestHelper::GetAssetPath(Mat), *GuidStr));
+
+			FMCPToolResult Result = GraphTool->Execute(Params);
+			TestFalse("result is not error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			// Partial struct import preserves unspecified keys
+			UMaterialExpressionVectorParameter* VecParam = Cast<UMaterialExpressionVectorParameter>(Expr);
+			if (TestNotNull("cast to VectorParameter", VecParam))
+			{
+				TestTrue("R is ~1.0", FMath::IsNearlyEqual(VecParam->DefaultValue.R, 1.0f, 0.001f));
+				TestTrue("G preserved (0.8)", FMath::IsNearlyEqual(VecParam->DefaultValue.G, 0.8f, 0.001f));
+				TestTrue("B preserved (0.8)", FMath::IsNearlyEqual(VecParam->DefaultValue.B, 0.8f, 0.001f));
+				TestTrue("A preserved (0.8)", FMath::IsNearlyEqual(VecParam->DefaultValue.A, 0.8f, 0.001f));
+			}
+
+			// No warnings expected
+			const TArray<TSharedPtr<FJsonValue>>* Warnings = nullptr;
+			bool bHasWarnings = Json->TryGetArrayField(TEXT("warnings"), Warnings);
+			if (bHasWarnings && Warnings) TestEqual("no warnings", Warnings->Num(), 0);
+		});
+	});
+
+	Describe("blueprint edit_node struct property", [this]()
+	{
+		It("edit_node with struct JSON object on blueprint node property", [this]()
+		{
+			if (!TestNotNull("graph tool", GraphTool)) return;
+
+			UBlueprint* BP = Helper.CreateTransientBlueprint(TEXT("TestBPEditNodeStruct"));
+			if (!TestNotNull("blueprint created", BP)) return;
+
+			FString AssetPath = FMCPToolDirectTestHelper::GetAssetPath(BP);
+
+			// Add a node
+			TSharedPtr<FJsonObject> AddParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(TEXT(R"({"action":"add_node","target":"%s","graph":"EventGraph","node_class":"Branch","pos_x":0,"pos_y":0})"),
+					*AssetPath));
+			FMCPToolResult AddResult = GraphTool->Execute(AddParams);
+			if (!TestFalse("add_node succeeded", AddResult.bIsError)) return;
+
+			TSharedPtr<FJsonObject> AddJson = FMCPToolDirectTestHelper::ParseResultJson(AddResult);
+			if (!TestNotNull("add_node result parsed", AddJson.Get())) return;
+
+			FString NodeId;
+			AddJson->TryGetStringField(TEXT("node_id"), NodeId);
+			if (!TestFalse("node_id not empty", NodeId.IsEmpty())) return;
+
+			// Try to set a non-existent struct property -> should produce warning
+			TSharedPtr<FJsonObject> EditParams = FMCPToolDirectTestHelper::MakeParamsFromJson(
+				FString::Printf(
+					TEXT(R"({"action":"edit_node","target":"%s","node":"%s","properties":{"FakeStructProp":{"X":1,"Y":2,"Z":3}}})"),
+					*AssetPath, *NodeId));
+
+			FMCPToolResult Result = GraphTool->Execute(EditParams);
+			TestFalse("result is not a hard error", Result.bIsError);
+
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* Warnings = nullptr;
+			TestTrue("has warnings for unknown property", Json->TryGetArrayField(TEXT("warnings"), Warnings));
+			if (Warnings) TestTrue("at least one warning", Warnings->Num() > 0);
 		});
 	});
 }

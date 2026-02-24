@@ -928,7 +928,11 @@ namespace
                     FString ValueStr;
                     if (FMCPJsonHelpers::JsonValueToPropertyString(Pair.Value, ValueStr))
                     {
-                        Prop->ImportText_Direct(*ValueStr, Prop->ContainerPtrToValuePtr<void>(Target), Target, PPF_None);
+                        const TCHAR* ImportResult = Prop->ImportText_Direct(*ValueStr, Prop->ContainerPtrToValuePtr<void>(Target), Target, PPF_None);
+                        if (ImportResult == nullptr)
+                        {
+                            Warnings.Add(FString::Printf(TEXT("Failed to set '%s' to '%s' on %s"), *Pair.Key, *ValueStr, *Target->GetClass()->GetName()));
+                        }
                     }
                 }
                 else

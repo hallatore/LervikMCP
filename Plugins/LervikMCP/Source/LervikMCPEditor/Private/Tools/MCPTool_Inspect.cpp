@@ -29,6 +29,7 @@
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionStaticBoolParameter.h"
 #include "Engine/Texture.h"
+#include "MCPMaterialHLSL.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -207,6 +208,7 @@ namespace
         { TEXT("pins"),        TEXT("List pins on a specific node. Target: 'AssetPath::NodeGUID'"), sInspectPinsParams, UE_ARRAY_COUNT(sInspectPinsParams), nullptr },
         { TEXT("parameters"),  TEXT("List Material parameters"), nullptr, 0, nullptr },
         { TEXT("connections"), TEXT("List connections on a specific node. Target: 'AssetPath::NodeGUID'"), sInspectPinsParams, UE_ARRAY_COUNT(sInspectPinsParams), nullptr },
+        { TEXT("hlsl"), TEXT("Generate pseudo-HLSL representation of a Material's expression graph with node IDs and positions"), nullptr, 0, nullptr },
     };
 
     static const FMCPToolHelpData sInspectHelp = {
@@ -226,7 +228,7 @@ FMCPToolInfo FMCPTool_Inspect::GetToolInfo() const
     Info.Description = TEXT("Inspect properties, components, nodes, variables, functions, pins, or parameters of an asset or actor");
     Info.Parameters = {
         { TEXT("target"), TEXT("Object path, actor label, 'selected', or 'AssetPath::NodeGUID' for pins"), TEXT("string"), true  },
-        { TEXT("type"),   TEXT("Values: properties|components|nodes|expressions|variables|functions|pins|parameters|connections. Default: properties"), TEXT("string"), false },
+        { TEXT("type"),   TEXT("Values: properties|components|nodes|expressions|variables|functions|pins|parameters|connections|hlsl"), TEXT("string"), true },
         { TEXT("filter"), TEXT("Glob/regex to filter results by name"), TEXT("string"), false },
         { TEXT("depth"),  TEXT("Property traversal depth. Default: 1"),          TEXT("integer"), false },
         { TEXT("detail"), TEXT("Values: all|skip_defaults. Default: skip_defaults. skip_defaults omits properties with default/empty values"), TEXT("string"), false },
@@ -249,9 +251,12 @@ FMCPToolResult FMCPTool_Inspect::Execute(const TSharedPtr<FJsonObject>& Params)
             return FMCPToolResult::Error(TEXT("'target' is required"));
         }
 
-        FString TypeParam = TEXT("properties");
+        FString TypeParam;
+        if (!Params->TryGetStringField(TEXT("type"), TypeParam))
+        {
+            return FMCPToolResult::Error(TEXT("'type' is required"));
+        }
         FString Filter;
-        Params->TryGetStringField(TEXT("type"),   TypeParam);
         Params->TryGetStringField(TEXT("filter"), Filter);
 
         FString DetailParam = TEXT("skip_defaults");
@@ -728,8 +733,27 @@ FMCPToolResult FMCPTool_Inspect::Execute(const TSharedPtr<FJsonObject>& Params)
             return FMCPJsonHelpers::SuccessResponse(Result);
         }
 
+        // ── hlsl ─────────────────────────────────────────────────────────────
+        if (TypeParam.Equals(TEXT("hlsl"), ESearchCase::IgnoreCase))
+        {
+            if (!Obj) return FMCPToolResult::Error(ResolveError);
+
+            UMaterial* Material = Cast<UMaterial>(Obj);
+            if (!Material)
+            {
+                return FMCPToolResult::Error(FString::Printf(TEXT("'%s' is not a Material — hlsl only works on Materials"), *AssetPath));
+            }
+
+            if (UMaterial* PreviewMat = FMCPGraphHelpers::GetEditorPreviewMaterial(Material))
+                Material = PreviewMat;
+
+            FString HlslCode = FMCPMaterialHLSL::GenerateHLSL(Material);
+
+            return FMCPToolResult::Text(HlslCode);
+        }
+
         return FMCPToolResult::Error(FString::Printf(
-            TEXT("Unknown 'type': '%s'. Valid: properties, components, nodes, expressions, variables, functions, pins, parameters, connections"),
+            TEXT("Unknown 'type': '%s'. Valid: properties, components, nodes, expressions, variables, functions, pins, parameters, connections, hlsl"),
             *TypeParam));
     });
 }
