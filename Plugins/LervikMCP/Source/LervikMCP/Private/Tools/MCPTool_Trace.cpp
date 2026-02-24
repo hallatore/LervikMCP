@@ -10,7 +10,7 @@
 
 namespace {
 
-TSharedPtr<FJsonObject> GpuNodeToJson(const FTraceGpuNode& Node)
+TSharedPtr<FJsonObject> TimingNodeToJson(const FTraceTimingNode& Node)
 {
     TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
     Obj->SetStringField(TEXT("name"),   Node.Name);
@@ -21,7 +21,7 @@ TSharedPtr<FJsonObject> GpuNodeToJson(const FTraceGpuNode& Node)
 
     TArray<TSharedPtr<FJsonValue>> ChildArray;
     for (const auto& Child : Node.Children)
-        ChildArray.Add(MakeShared<FJsonValueObject>(GpuNodeToJson(Child)));
+        ChildArray.Add(MakeShared<FJsonValueObject>(TimingNodeToJson(Child)));
     Obj->SetArrayField(TEXT("children"), ChildArray);
 
     return Obj;
@@ -30,32 +30,27 @@ TSharedPtr<FJsonObject> GpuNodeToJson(const FTraceGpuNode& Node)
 // ── Help data ────────────────────────────────────────────────────────────
 
 static const FMCPParamHelp sTraceStartParams[] = {
-    { TEXT("channels"), TEXT("string"),  false, TEXT("Trace channels comma-separated. Default: cpu,gpu,frame,bookmark"), nullptr, TEXT("cpu,gpu,frame,bookmark") },
     { TEXT("path"),     TEXT("string"),  false, TEXT("Optional output .utrace file path"), nullptr, nullptr },
 };
 
 static const FMCPParamHelp sTraceAnalyzeParams[] = {
     { TEXT("path"),   TEXT("string"),  true,  TEXT("Required .utrace file path to analyze"), nullptr, nullptr },
-    { TEXT("depth"),  TEXT("integer"), false, TEXT("GPU tree depth levels. Default: 1"), nullptr, TEXT("2") },
+    { TEXT("depth"),  TEXT("integer"), false, TEXT("Tree depth levels for GPU and CPU. Default: 1"), nullptr, TEXT("2") },
     { TEXT("min_ms"), TEXT("number"),  false, TEXT("Min avg ms filter threshold. Default: 0.1"), nullptr, TEXT("0.5") },
-    { TEXT("filter"), TEXT("string"),  false, TEXT("Case-insensitive substring filter on GPU node names. Overrides depth limit"), nullptr, TEXT("Shadow") },
-};
-
-static const FMCPParamHelp sTraceTestParams[] = {
-    { TEXT("channels"), TEXT("string"), false, TEXT("Trace channels. Default: cpu,gpu,frame,bookmark"), nullptr, nullptr },
+    { TEXT("filter"), TEXT("string"),  false, TEXT("Case-insensitive substring filter on node names. Overrides depth limit"), nullptr, TEXT("Shadow") },
 };
 
 static const FMCPActionHelp sTraceActions[] = {
     { TEXT("start"),   TEXT("Start a new Unreal Insights trace to file"), sTraceStartParams, UE_ARRAY_COUNT(sTraceStartParams), nullptr },
     { TEXT("stop"),    TEXT("Stop the active trace and flush to disk"), nullptr, 0, nullptr },
     { TEXT("status"),  TEXT("Check if a trace is currently active"), nullptr, 0, nullptr },
-    { TEXT("analyze"), TEXT("Analyze GPU pass data from a .utrace file"), sTraceAnalyzeParams, UE_ARRAY_COUNT(sTraceAnalyzeParams), nullptr },
-    { TEXT("test"),    TEXT("Start trace, wait 5s, stop, and return combined result"), sTraceTestParams, UE_ARRAY_COUNT(sTraceTestParams), nullptr },
+    { TEXT("analyze"), TEXT("Analyze GPU and CPU profiling data from a .utrace file"), sTraceAnalyzeParams, UE_ARRAY_COUNT(sTraceAnalyzeParams), nullptr },
+    { TEXT("test"),    TEXT("Start trace, wait 5s, stop, and return combined result"), nullptr, 0, nullptr },
 };
 
 static const FMCPToolHelpData sTraceHelp = {
     TEXT("trace"),
-    TEXT("Control Unreal Insights tracing and analyze GPU data from .utrace files"),
+    TEXT("Control Unreal Insights tracing and analyze GPU/CPU data from .utrace files"),
     TEXT("action"),
     sTraceActions, UE_ARRAY_COUNT(sTraceActions),
     nullptr, 0
@@ -67,14 +62,13 @@ FMCPToolInfo FMCPTool_Trace::GetToolInfo() const
 {
     FMCPToolInfo Info;
     Info.Name        = TEXT("trace");
-    Info.Description = TEXT("Control Unreal Insights tracing and analyze GPU data from .utrace files");
+    Info.Description = TEXT("Control Unreal Insights tracing and analyze GPU/CPU data from .utrace files");
     Info.Parameters  = {
         { TEXT("action"),   TEXT("Values: start|stop|status|analyze|test"),                                TEXT("string"),  true  },
-        { TEXT("channels"), TEXT("[start|test] Trace channels comma-separated. Default: cpu,gpu,frame,bookmark"), TEXT("string"), false },
         { TEXT("path"),     TEXT("[analyze] Required .utrace file path. [start] Optional output path"),   TEXT("string"),  false },
-        { TEXT("depth"),    TEXT("[analyze] GPU tree depth levels. Default: 1"),                           TEXT("integer"), false },
+        { TEXT("depth"),    TEXT("[analyze] Tree depth levels for GPU and CPU. Default: 1"),              TEXT("integer"), false },
         { TEXT("min_ms"),   TEXT("[analyze] Min avg ms filter threshold. Default: 0.1"),                  TEXT("number"),  false },
-        { TEXT("filter"),   TEXT("[analyze] Case-insensitive substring filter on GPU node names. Overrides depth limit"), TEXT("string"), false },
+        { TEXT("filter"),   TEXT("[analyze] Case-insensitive substring filter on node names. Overrides depth limit"), TEXT("string"), false },
         { TEXT("help"),     TEXT("Pass help=true for overview, help='action_name' for detailed parameter info"), TEXT("string"), false },
     };
     return Info;
@@ -138,8 +132,14 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
 
         TArray<TSharedPtr<FJsonValue>> GpuArray;
         for (const auto& Node : R.GpuRoot.Children)
-            GpuArray.Add(MakeShared<FJsonValueObject>(GpuNodeToJson(Node)));
+            GpuArray.Add(MakeShared<FJsonValueObject>(TimingNodeToJson(Node)));
         Json->SetArrayField(TEXT("gpu"), GpuArray);
+
+        TArray<TSharedPtr<FJsonValue>> CpuArray;
+        for (const auto& Node : R.CpuRoot.Children)
+            CpuArray.Add(MakeShared<FJsonValueObject>(TimingNodeToJson(Node)));
+        Json->SetArrayField(TEXT("cpu"), CpuArray);
+        Json->SetNumberField(TEXT("cpu_frame_count"), R.CpuFrameCount);
 
         return FMCPJsonHelpers::SuccessResponse(Json);
     }
@@ -181,7 +181,6 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
         FPlatformProcess::Sleep(5.0f);
 
         FString StartPath;
-        FString Channels;
         FMCPToolResult StartResult = ExecuteOnGameThread([&, Params]() -> FMCPToolResult
         {
             if (FTraceAuxiliary::IsConnected())
@@ -190,9 +189,6 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
                     return FMCPToolResult::Error(TEXT("Trace already active"));
                 FTraceAuxiliary::Stop();
             }
-
-            if (!Params->TryGetStringField(TEXT("channels"), Channels) || Channels.IsEmpty())
-                Channels = TEXT("cpu,gpu,frame,bookmark");
 
             FString ExplicitPath;
             const TCHAR* Target = nullptr;
@@ -205,7 +201,7 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
             }
 
             bool bStarted = FTraceAuxiliary::Start(
-                FTraceAuxiliary::EConnectionType::File, Target, *Channels, &Options);
+                FTraceAuxiliary::EConnectionType::File, Target, TEXT("cpu,gpu,frame,bookmark"), &Options);
             if (!bStarted)
                 return FMCPToolResult::Error(TEXT("FTraceAuxiliary::Start failed"));
 
@@ -241,7 +237,6 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
         Result->SetStringField(TEXT("action"), TEXT("test"));
         Result->SetStringField(TEXT("start_path"), StartPath);
         Result->SetStringField(TEXT("stop_path"), StopPath);
-        Result->SetStringField(TEXT("channels"), Channels);
         if (FTraceAuxiliary::IsConnected())
             Result->SetStringField(TEXT("warning"), TEXT("Trace writer did not flush within timeout"));
         return FMCPJsonHelpers::SuccessResponse(Result);
@@ -263,10 +258,6 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
                 FTraceAuxiliary::Stop();
             }
 
-            FString Channels;
-            if (!Params->TryGetStringField(TEXT("channels"), Channels) || Channels.IsEmpty())
-                Channels = TEXT("cpu,gpu,frame,bookmark");
-
             FString ExplicitPath;
             const TCHAR* Target = nullptr;
             FTraceAuxiliary::FOptions Options;
@@ -280,7 +271,7 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
             bool bStarted = FTraceAuxiliary::Start(
                 FTraceAuxiliary::EConnectionType::File,
                 Target,
-                *Channels,
+                TEXT("cpu,gpu,frame,bookmark"),
                 &Options);
 
             if (!bStarted)
@@ -289,7 +280,6 @@ FMCPToolResult FMCPTool_Trace::Execute(const TSharedPtr<FJsonObject>& Params)
             TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
             Result->SetStringField(TEXT("action"),    TEXT("start"));
             Result->SetStringField(TEXT("path"), FTraceAuxiliary::GetTraceDestinationString());
-            Result->SetStringField(TEXT("channels"),  Channels);
             return FMCPJsonHelpers::SuccessResponse(Result);
         }
 

@@ -128,7 +128,7 @@ static const FMCPSkillStep ProfilingSteps[] =
 	},
 	{
 		TEXT("Manual capture for longer sessions — start, do activity, stop"),
-		TEXT("{\"tool\":\"trace\",\"params\":{\"action\":\"start\",\"channels\":\"gpu,frame\"}}")
+		TEXT("{\"tool\":\"trace\",\"params\":{\"action\":\"start\"}}")
 	},
 	{
 		TEXT("Stop manual capture"),
@@ -147,6 +147,10 @@ static const FMCPSkillStep ProfilingSteps[] =
 		TEXT("{\"tool\":\"trace\",\"params\":{\"action\":\"analyze\",\"path\":\"<trace_path>\",\"filter\":\"Shadow\"}}")
 	},
 	{
+		TEXT("Analyze CPU thread timings — shows GameThread, RenderThread breakdown"),
+		TEXT("{\"tool\":\"trace\",\"params\":{\"action\":\"analyze\",\"path\":\"<trace_path>\",\"depth\":\"2\"}}")
+	},
+	{
 		TEXT("A/B test: capture baseline, change CVar, capture again, compare"),
 		TEXT("{\"tool\":\"execute\",\"params\":{\"action\":\"set_cvar\",\"name\":\"r.Shadow.MaxResolution\",\"value\":\"512\"}}")
 	},
@@ -162,9 +166,10 @@ static const TCHAR* ProfilingTips =
 	TEXT("min_ms filters out passes below a threshold (default 0.1) — use 0.5+ to focus on expensive passes\n")
 	TEXT("filter is case-insensitive substring match — overrides depth limit, shows full subtree for matches\n")
 	TEXT("Common filters: Shadow, Lumen, TSR, Nanite, BasePass, Translucency, PostProcessing, VolumetricFog\n")
-	TEXT("Channels: gpu,frame is minimum for GPU analysis; add cpu for full CPU trace\n")
+	TEXT("Channels are fixed to cpu,gpu,frame,bookmark — no configuration needed\n")
 	TEXT("The trace path is returned in the response — save it for subsequent analyze calls\n")
 	TEXT("Multiple analyze calls on same trace are fast (parsed once)\n")
+	TEXT("CPU data is included in analyze results — shows GameThread and RenderThread timings alongside GPU passes\n")
 	TEXT("For A/B testing: always capture baseline first, change ONE setting, capture again, compare, then reset\n")
 	TEXT("Use execute action=get_cvar to read current values before changing");
 
@@ -192,8 +197,8 @@ static const FMCPSkillData RegisteredSkills[] =
 	},
 	{
 		TEXT("profiling"),
-		TEXT("GPU Performance Profiling"),
-		TEXT("How to capture Unreal Insights traces, analyze GPU pass timings, filter by pass name, and compare before/after with CVar changes. Full workflow from capture to analysis."),
+		TEXT("GPU & CPU Performance Profiling"),
+		TEXT("How to capture Unreal Insights traces, analyze GPU pass and CPU thread timings, filter by name, and compare before/after with CVar changes. Full workflow from capture to analysis."),
 		TEXT("Tools: trace, execute (for CVar changes)"),
 		ProfilingSteps, UE_ARRAY_COUNT(ProfilingSteps),
 		ProfilingTips

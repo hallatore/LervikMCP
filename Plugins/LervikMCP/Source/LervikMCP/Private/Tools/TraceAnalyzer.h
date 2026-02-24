@@ -9,23 +9,26 @@ struct FTraceFrameStats
     double MaxFrameTimeMs  = 0.0;
 };
 
-struct FTraceGpuNode
+struct FTraceTimingNode
 {
     FString Name;
     int32   Count   = 0;
     double  TotalMs = 0.0;
     double  MinMs   = TNumericLimits<double>::Max();
     double  MaxMs   = 0.0;
-    TArray<FTraceGpuNode> Children;
+    TArray<FTraceTimingNode> Children;
 
     double GetAvgMs() const { return Count > 0 ? TotalMs / Count : 0.0; }
 };
+using FTraceGpuNode = FTraceTimingNode;
 
 struct FTraceAnalysisResult
 {
     FTraceFrameStats FrameStats;
-    FTraceGpuNode    GpuRoot;   // virtual root — actual top-level GPU nodes are in Children
+    FTraceTimingNode GpuRoot;   // virtual root — actual top-level GPU nodes are in Children
+    FTraceTimingNode CpuRoot;   // virtual root — game thread children
     int32            RenderPassCount = 0;
+    int32            CpuFrameCount   = 0;
     FString          FilePath;
     FString          Error;
 };

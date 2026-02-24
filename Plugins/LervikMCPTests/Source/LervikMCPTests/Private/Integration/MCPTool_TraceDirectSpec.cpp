@@ -261,6 +261,14 @@ void FMCPTool_TraceDirectSpec::Define()
 			// GPU array must be present
 			const TArray<TSharedPtr<FJsonValue>>* GpuArray = nullptr;
 			TestTrue("gpu field present", Json->TryGetArrayField(TEXT("gpu"), GpuArray));
+
+			// CPU array must be present
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray));
+
+			double CpuFrameCount = -1.0;
+			TestTrue("cpu_frame_count field present", Json->TryGetNumberField(TEXT("cpu_frame_count"), CpuFrameCount));
+			TestTrue("cpu_frame_count >= 0", CpuFrameCount >= 0.0);
 		});
 	});
 
@@ -283,15 +291,13 @@ void FMCPTool_TraceDirectSpec::Define()
 			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
 			if (!TestNotNull("result JSON parsed", Json.Get())) return;
 
-			FString StartPath, StopPath, Channels;
+			FString StartPath, StopPath;
 			Json->TryGetStringField(TEXT("start_path"), StartPath);
 			Json->TryGetStringField(TEXT("stop_path"), StopPath);
-			Json->TryGetStringField(TEXT("channels"), Channels);
 
 			TestFalse("start_path non-empty", StartPath.IsEmpty());
 			TestFalse("stop_path non-empty", StopPath.IsEmpty());
 			TestEqual("start and stop paths match", StartPath, StopPath);
-			TestFalse("channels non-empty", Channels.IsEmpty());
 		});
 
 		It("returns error when trace already active", [this]()
@@ -357,28 +363,7 @@ void FMCPTool_TraceDirectSpec::Define()
 			Done.Execute();
 		});
 
-		It("respects custom channels", [this]()
-		{
-			if (!TestNotNull("trace tool found", TraceTool)) return;
 
-			FString UniquePath = FPaths::ProjectSavedDir() / FString::Printf(
-				TEXT("Profiling/MCPTestChannels_%s.utrace"), *FGuid::NewGuid().ToString());
-
-			FMCPToolResult Result = TraceTool->Execute(
-				FMCPToolDirectTestHelper::MakeParams({
-					{ TEXT("action"),   TEXT("test") },
-					{ TEXT("path"),     UniquePath },
-					{ TEXT("channels"), TEXT("cpu,frame") }
-				})
-			);
-			TestFalse("test is not an error", Result.bIsError);
-			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
-			if (!TestNotNull("result JSON parsed", Json.Get())) return;
-
-			FString Channels;
-			Json->TryGetStringField(TEXT("channels"), Channels);
-			TestEqual("channels matches custom value", Channels, TEXT("cpu,frame"));
-		});
 	});
 
 	Describe("gpu tree", [this]()
@@ -632,6 +617,195 @@ void FMCPTool_TraceDirectSpec::Define()
 			const TSharedPtr<FJsonObject>* FirstChildObj = nullptr;
 			if (!(*Children)[0].IsValid() || !(*Children)[0]->TryGetObject(FirstChildObj)) return;
 			VerifyNodeFields(*FirstChildObj, TEXT("first gpu node child"));
+		});
+	});
+
+	Describe("cpu tree", [this]()
+	{
+		auto RecordTrace = [this]() -> FString
+		{
+			FString UniquePath = FPaths::ProjectSavedDir() / FString::Printf(
+				TEXT("Profiling/MCPCpuTest_%s.utrace"), *FGuid::NewGuid().ToString());
+			TraceTool->Execute(FMCPToolDirectTestHelper::MakeParams({
+				{ TEXT("action"), TEXT("start") }, { TEXT("path"), UniquePath }
+			}));
+			FPlatformProcess::Sleep(0.2f);
+			FMCPToolResult StopResult = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({ { TEXT("action"), TEXT("stop") } }));
+			FPlatformProcess::Sleep(0.1f);
+			FString TracePath = UniquePath;
+			TSharedPtr<FJsonObject> StopJson = FMCPToolDirectTestHelper::ParseResultJson(StopResult);
+			if (StopJson.IsValid())
+				StopJson->TryGetStringField(TEXT("path"), TracePath);
+			return TracePath;
+		};
+
+		It("depth=0 returns empty cpu array", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("depth"),  TEXT("0") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+			TestTrue("cpu array is empty for depth=0", CpuArray->IsEmpty());
+		});
+
+		It("min_ms=99999 returns empty cpu array", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("min_ms"), TEXT("99999") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+			TestTrue("cpu array is empty with extreme min_ms", CpuArray->IsEmpty());
+		});
+
+		It("filter with no matches returns empty cpu array", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("filter"), TEXT("ZZNONEXISTENT_99") },
+					{ TEXT("min_ms"), TEXT("0") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+			TestTrue("cpu array is empty for non-matching filter", CpuArray->IsEmpty());
+		});
+
+		It("default depth nodes have empty children arrays", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("depth"),  TEXT("1") },
+					{ TEXT("min_ms"), TEXT("0") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+
+			for (const auto& NodeVal : *CpuArray)
+			{
+				const TSharedPtr<FJsonObject>* NodeObj = nullptr;
+				if (!NodeVal.IsValid() || !NodeVal->TryGetObject(NodeObj)) continue;
+				const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+				TestTrue("node has children field", (*NodeObj)->TryGetArrayField(TEXT("children"), Children));
+				if (Children)
+					TestTrue("top-level node children empty at depth=1", Children->IsEmpty());
+			}
+		});
+
+		It("cpu nodes have required JSON fields", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("depth"),  TEXT("2") },
+					{ TEXT("min_ms"), TEXT("0") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+			if (CpuArray->IsEmpty()) return;
+
+			auto VerifyNodeFields = [this](const TSharedPtr<FJsonObject>& Node, const FString& Context)
+			{
+				FString Name;
+				double Count = -1.0, AvgMs = -1.0, NodeMinMs = -1.0, NodeMaxMs = -1.0;
+				TestTrue(Context + TEXT(" has name (string)"),   Node->TryGetStringField(TEXT("name"),   Name));
+				TestTrue(Context + TEXT(" has count (number)"),  Node->TryGetNumberField(TEXT("count"),  Count));
+				TestTrue(Context + TEXT(" has avg_ms (number)"), Node->TryGetNumberField(TEXT("avg_ms"), AvgMs));
+				TestTrue(Context + TEXT(" has min_ms (number)"), Node->TryGetNumberField(TEXT("min_ms"), NodeMinMs));
+				TestTrue(Context + TEXT(" has max_ms (number)"), Node->TryGetNumberField(TEXT("max_ms"), NodeMaxMs));
+				const TArray<TSharedPtr<FJsonValue>>* NodeChildren = nullptr;
+				TestTrue(Context + TEXT(" has children (array)"), Node->TryGetArrayField(TEXT("children"), NodeChildren));
+			};
+
+			const TSharedPtr<FJsonObject>* FirstNodeObj = nullptr;
+			if (!(*CpuArray)[0].IsValid() || !(*CpuArray)[0]->TryGetObject(FirstNodeObj)) return;
+			VerifyNodeFields(*FirstNodeObj, TEXT("first cpu node"));
+
+			const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+			if (!(*FirstNodeObj)->TryGetArrayField(TEXT("children"), Children) || Children->IsEmpty()) return;
+
+			const TSharedPtr<FJsonObject>* FirstChildObj = nullptr;
+			if (!(*Children)[0].IsValid() || !(*Children)[0]->TryGetObject(FirstChildObj)) return;
+			VerifyNodeFields(*FirstChildObj, TEXT("first cpu node child"));
+		});
+
+		It("empty filter preserves depth behavior", [this, RecordTrace]()
+		{
+			if (!TestNotNull("trace tool found", TraceTool)) return;
+			FString TracePath = RecordTrace();
+
+			FMCPToolResult Result = TraceTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("action"), TEXT("analyze") },
+					{ TEXT("path"),   TracePath },
+					{ TEXT("filter"), TEXT("") },
+					{ TEXT("depth"),  TEXT("1") },
+					{ TEXT("min_ms"), TEXT("0") }
+				})
+			);
+			if (!TestFalse("analyze is not an error", Result.bIsError)) return;
+			TSharedPtr<FJsonObject> Json = FMCPToolDirectTestHelper::ParseResultJson(Result);
+			if (!TestNotNull("result JSON parsed", Json.Get())) return;
+			const TArray<TSharedPtr<FJsonValue>>* CpuArray = nullptr;
+			if (!TestTrue("cpu field present", Json->TryGetArrayField(TEXT("cpu"), CpuArray))) return;
+
+			for (const auto& NodeVal : *CpuArray)
+			{
+				const TSharedPtr<FJsonObject>* NodeObj = nullptr;
+				if (!NodeVal.IsValid() || !NodeVal->TryGetObject(NodeObj)) continue;
+				const TArray<TSharedPtr<FJsonValue>>* Children = nullptr;
+				TestTrue("node has children field", (*NodeObj)->TryGetArrayField(TEXT("children"), Children));
+				if (Children)
+					TestTrue("top-level node children empty at depth=1 with empty filter", Children->IsEmpty());
+			}
 		});
 	});
 }
