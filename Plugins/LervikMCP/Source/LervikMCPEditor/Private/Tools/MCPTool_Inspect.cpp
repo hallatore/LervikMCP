@@ -30,6 +30,7 @@
 #include "Materials/MaterialExpressionStaticBoolParameter.h"
 #include "Engine/Texture.h"
 #include "MCPMaterialHLSL.h"
+#include "MCPBlueprintCPP.h"
 
 #include "Dom/JsonObject.h"
 #include "Dom/JsonValue.h"
@@ -209,6 +210,7 @@ namespace
         { TEXT("parameters"),  TEXT("List Material parameters"), nullptr, 0, nullptr },
         { TEXT("connections"), TEXT("List connections on a specific node. Target: 'AssetPath::NodeGUID'"), sInspectPinsParams, UE_ARRAY_COUNT(sInspectPinsParams), nullptr },
         { TEXT("hlsl"), TEXT("Generate pseudo-HLSL representation of a Material's expression graph with node IDs and positions"), nullptr, 0, nullptr },
+        { TEXT("cpp"), TEXT("Generate pseudo-C++ representation of a Blueprint graph with node IDs and positions. Target: 'BlueprintPath::GraphName' (default: EventGraph)"), nullptr, 0, nullptr },
     };
 
     static const FMCPToolHelpData sInspectHelp = {
@@ -228,7 +230,7 @@ FMCPToolInfo FMCPTool_Inspect::GetToolInfo() const
     Info.Description = TEXT("Inspect properties, components, nodes, variables, functions, pins, or parameters of an asset or actor");
     Info.Parameters = {
         { TEXT("target"), TEXT("Object path, actor label, 'selected', or 'AssetPath::NodeGUID' for pins"), TEXT("string"), true  },
-        { TEXT("type"),   TEXT("Values: properties|components|nodes|expressions|variables|functions|pins|parameters|connections|hlsl"), TEXT("string"), true },
+        { TEXT("type"),   TEXT("Values: properties|components|nodes|expressions|variables|functions|pins|parameters|connections|hlsl|cpp"), TEXT("string"), true },
         { TEXT("filter"), TEXT("Glob/regex to filter results by name"), TEXT("string"), false },
         { TEXT("depth"),  TEXT("Property traversal depth. Default: 1"),          TEXT("integer"), false },
         { TEXT("detail"), TEXT("Values: all|skip_defaults. Default: skip_defaults. skip_defaults omits properties with default/empty values"), TEXT("string"), false },
@@ -443,11 +445,15 @@ FMCPToolResult FMCPTool_Inspect::Execute(const TSharedPtr<FJsonObject>& Params)
             {
                 if (!PassesFilter(Var.VarName.ToString())) continue;
 
+                FString DefaultVal = Var.DefaultValue;
+                if (DefaultVal.IsEmpty())
+                    DefaultVal = FMCPBlueprintCPP::GetCDODefaultString(Blueprint, Var.VarName);
+
                 TSharedPtr<FJsonObject> VarObj = MakeShared<FJsonObject>();
                 VarObj->SetStringField(TEXT("name"),          Var.VarName.ToString());
                 VarObj->SetStringField(TEXT("type"),          UEdGraphSchema_K2::TypeToText(Var.VarType).ToString());
                 VarObj->SetStringField(TEXT("category"),      Var.Category.ToString());
-                VarObj->SetStringField(TEXT("default_value"), Var.DefaultValue);
+                VarObj->SetStringField(TEXT("default_value"), DefaultVal);
                 ResultArray.Add(MakeShared<FJsonValueObject>(VarObj));
             }
 
@@ -752,8 +758,25 @@ FMCPToolResult FMCPTool_Inspect::Execute(const TSharedPtr<FJsonObject>& Params)
             return FMCPToolResult::Text(HlslCode);
         }
 
+        // ── cpp ──────────────────────────────────────────────────────────────
+        if (TypeParam.Equals(TEXT("cpp"), ESearchCase::IgnoreCase))
+        {
+            if (!Obj) return FMCPToolResult::Error(ResolveError);
+
+            UBlueprint* Blueprint = Cast<UBlueprint>(Obj);
+            if (!Blueprint)
+            {
+                return FMCPToolResult::Error(FString::Printf(
+                    TEXT("'%s' is not a Blueprint \u2014 cpp only works on Blueprints"), *AssetPath));
+            }
+
+            FString CppCode = FMCPBlueprintCPP::GenerateCPP(Blueprint, NodeGuidStr);
+
+            return FMCPToolResult::Text(CppCode);
+        }
+
         return FMCPToolResult::Error(FString::Printf(
-            TEXT("Unknown 'type': '%s'. Valid: properties, components, nodes, expressions, variables, functions, pins, parameters, connections, hlsl"),
+            TEXT("Unknown 'type': '%s'. Valid: properties, components, nodes, expressions, variables, functions, pins, parameters, connections, hlsl, cpp"),
             *TypeParam));
     });
 }

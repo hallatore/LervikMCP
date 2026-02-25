@@ -33,7 +33,7 @@ Do a trace and give me a breakdown of the frametime (depth 2)
 
 **`find`** — Search for assets, actors, classes, or properties in the editor with name/path/class filters. Also retrieves the current editor selection.
 
-**`inspect`** — Inspect detailed info on an asset or actor: properties, components, Blueprint nodes/variables/functions/pins, material expressions, or connections.
+**`inspect`** — Inspect detailed info on an asset or actor: properties, components, Blueprint nodes/variables/functions/pins/pseudo-C++, material expressions/pseudo-HLSL, or connections.
 
 **`create`** — Spawn a new actor in the level or create a new asset (Blueprint, Material, MaterialInstance), with optional duplication from a template.
 

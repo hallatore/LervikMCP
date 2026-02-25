@@ -290,6 +290,15 @@ struct FMCPGraphHelpers
             }
         }
 
+        // Also check MacroGraphs
+        for (UEdGraph* Graph : Blueprint->MacroGraphs)
+        {
+            if (Graph && Graph->GetName().Equals(GraphName, ESearchCase::IgnoreCase))
+            {
+                return Graph;
+            }
+        }
+
         return nullptr;
     }
 };
