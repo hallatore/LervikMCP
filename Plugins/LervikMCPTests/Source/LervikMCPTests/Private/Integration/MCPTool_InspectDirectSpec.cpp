@@ -1,7 +1,12 @@
 #include "Misc/AutomationTest.h"
 #include "MCPToolDirectTestHelper.h"
 #include "Materials/MaterialExpressionAdd.h"
+#include "Materials/MaterialExpressionMaterialFunctionCall.h"
 #include "Materials/MaterialExpressionConstant.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
+#include "Materials/MaterialExpressionNamedReroute.h"
+#include "Materials/MaterialExpressionReroute.h"
+#include "Materials/MaterialExpressionSphereMask.h"
 #include "Materials/MaterialExpression.h"
 #include "Materials/Material.h"
 #include "MaterialExpressionIO.h"
@@ -853,6 +858,311 @@ void FMCPTool_InspectDirectSpec::Define()
 				Result.Content.Contains(TEXT("Dangling")));
 			TestTrue("contains dangling value 0.42",
 				Result.Content.Contains(TEXT("0.42")));
+		});
+
+		It("emits StaticSwitchParameter as ternary, not as bool parameter", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslSSP"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			auto* TrueConst = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("true const", TrueConst)) return;
+			TrueConst->R = 0.75f;
+
+			auto* FalseConst = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("false const", FalseConst)) return;
+			FalseConst->R = 0.25f;
+
+			auto* SSP = Cast<UMaterialExpressionStaticSwitchParameter>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionStaticSwitchParameter::StaticClass()));
+			if (!TestNotNull("SSP created", SSP)) return;
+			SSP->ParameterName = TEXT("MySwitch");
+			SSP->DefaultValue = false;
+			SSP->A.Expression = TrueConst;
+			SSP->A.OutputIndex = 0;
+			SSP->B.Expression = FalseConst;
+			SSP->B.OutputIndex = 0;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = SSP;
+			BaseColorInput->OutputIndex = 0;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			TestFalse("no bool param for SSP",
+				Result.Content.Contains(TEXT("bool Switch_MySwitch")));
+			TestTrue("has Switch_ prefix var",
+				Result.Content.Contains(TEXT("Switch_MySwitch")));
+			TestTrue("has ternary with false condition",
+				Result.Content.Contains(TEXT("false ?")));
+			TestTrue("contains true branch value",
+				Result.Content.Contains(TEXT("0.75")));
+			TestTrue("contains false branch value",
+				Result.Content.Contains(TEXT("0.25")));
+
+			int32 ParamSectionIdx = Result.Content.Find(TEXT("Parameters"));
+			int32 ExprSectionIdx = Result.Content.Find(TEXT("Expressions"));
+			int32 SwitchIdx = Result.Content.Find(TEXT("Switch_MySwitch"));
+			if (ParamSectionIdx != INDEX_NONE && ExprSectionIdx != INDEX_NONE && SwitchIdx != INDEX_NONE)
+			{
+				TestTrue("SSP is in Expressions section (after header)",
+					SwitchIdx > ExprSectionIdx);
+			}
+		});
+	});
+
+	Describe("type=hlsl reroute ordering", [this]()
+	{
+		It("reroute declaration appears after its input expression", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslRerouteOrder"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			// Constant -> Add -> NamedRerouteDeclaration -> BaseColor
+			auto* ConstA = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("constA", ConstA)) return;
+			ConstA->R = 0.3f;
+
+			auto* ConstB = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("constB", ConstB)) return;
+			ConstB->R = 0.7f;
+
+			auto* AddExpr = Cast<UMaterialExpressionAdd>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionAdd::StaticClass()));
+			if (!TestNotNull("add expr", AddExpr)) return;
+			FExpressionInput* AddA = FMCPGraphHelpers::GetExpressionInput(AddExpr, 0);
+			FExpressionInput* AddB = FMCPGraphHelpers::GetExpressionInput(AddExpr, 1);
+			if (!TestNotNull("add input A", AddA) || !TestNotNull("add input B", AddB)) return;
+			AddA->Expression = ConstA;
+			AddB->Expression = ConstB;
+
+			auto* RerouteDecl = Cast<UMaterialExpressionNamedRerouteDeclaration>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionNamedRerouteDeclaration::StaticClass()));
+			if (!TestNotNull("reroute decl", RerouteDecl)) return;
+			RerouteDecl->Name = TEXT("MyReroute");
+			FExpressionInput* RerouteInput = FMCPGraphHelpers::GetExpressionInput(RerouteDecl, 0);
+			if (!TestNotNull("reroute input", RerouteInput)) return;
+			RerouteInput->Expression = AddExpr;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = RerouteDecl;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			TestFalse("no separate Reroute Declarations section",
+				Result.Content.Contains(TEXT("Reroute Declarations")));
+
+			TestTrue("has Expressions section",
+				Result.Content.Contains(TEXT("Expressions")));
+
+			FString AddVarName = FString::Printf(TEXT("Add_%s"),
+				*FMCPJsonHelpers::GuidToCompact(AddExpr->MaterialExpressionGuid));
+			int32 AddIdx = Result.Content.Find(AddVarName);
+			int32 RerouteIdx = Result.Content.Find(TEXT("Reroute_MyReroute"));
+			if (AddIdx != INDEX_NONE && RerouteIdx != INDEX_NONE)
+			{
+				TestTrue("Add expression appears before Reroute declaration",
+					AddIdx < RerouteIdx);
+			}
+			else
+			{
+				AddError(FString::Printf(TEXT("Could not find Add (%d) or Reroute (%d) in output"), AddIdx, RerouteIdx));
+			}
+
+			TestTrue("reroute references Add var",
+				Result.Content.Contains(FString::Printf(TEXT("Reroute_MyReroute = %s"), *AddVarName)));
+		});
+	});
+
+	Describe("type=hlsl reroute disambiguation", [this]()
+	{
+		It("plain Reroute uses Wire_ prefix and assignment syntax", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslPlainReroute"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			auto* Const = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("const", Const)) return;
+			Const->R = 0.5f;
+
+			auto* Reroute = Cast<UMaterialExpressionReroute>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionReroute::StaticClass()));
+			if (!TestNotNull("reroute", Reroute)) return;
+			FExpressionInput* RerouteIn = FMCPGraphHelpers::GetExpressionInput(Reroute, 0);
+			if (!TestNotNull("reroute input", RerouteIn)) return;
+			RerouteIn->Expression = Const;
+
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = Reroute;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			FString WireVarName = FString::Printf(TEXT("Wire_%s"),
+				*FMCPJsonHelpers::GuidToCompact(Reroute->MaterialExpressionGuid));
+
+			TestTrue("uses Wire_ prefix", Result.Content.Contains(WireVarName));
+			TestFalse("does not use Reroute_ prefix for plain reroute",
+				Result.Content.Contains(FString::Printf(TEXT("Reroute_%s"),
+					*FMCPJsonHelpers::GuidToCompact(Reroute->MaterialExpressionGuid))));
+
+			TestTrue("emits as assignment",
+				Result.Content.Contains(FString::Printf(TEXT("%s = "), *WireVarName)));
+			TestFalse("no function call syntax",
+				Result.Content.Contains(TEXT("Reroute(Input:")));
+		});
+	});
+
+	Describe("type=hlsl function call inputs", [this]()
+	{
+		It("unconnected inputs emit null and connected inputs emit var name", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslFuncCallInputs"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			// Create a constant to wire into the first input
+			auto* ConstExpr = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("constant", ConstExpr)) return;
+			ConstExpr->R = 1.5f;
+
+			// Create MaterialFunctionCall with manually populated FunctionInputs
+			auto* FuncCall = Cast<UMaterialExpressionMaterialFunctionCall>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionMaterialFunctionCall::StaticClass()));
+			if (!TestNotNull("func call", FuncCall)) return;
+
+			// Input 0: connected to constant
+			FFunctionExpressionInput FI0;
+			FI0.ExpressionInput = nullptr;
+			FI0.Input.Expression = ConstExpr;
+			FI0.Input.OutputIndex = 0;
+			FuncCall->FunctionInputs.Add(FI0);
+
+			// Input 1: unconnected
+			FFunctionExpressionInput FI1;
+			FI1.ExpressionInput = nullptr;
+			FI1.Input.Expression = nullptr;
+			FuncCall->FunctionInputs.Add(FI1);
+
+			// Connect func call to BaseColor
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = FuncCall;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			// Verify output contains null for unconnected input
+			TestTrue("contains null for unconnected input",
+				Result.Content.Contains(TEXT("null")));
+
+			// Verify connected input references the constant var name
+			FString ConstVarName = FString::Printf(TEXT("Constant_%s"),
+				*FMCPJsonHelpers::GuidToCompact(ConstExpr->MaterialExpressionGuid));
+			TestTrue("contains constant var reference",
+				Result.Content.Contains(ConstVarName));
+
+			// Verify no trailing comma pattern like FunctionCall("...", )
+			TestFalse("no trailing comma",
+				Result.Content.Contains(TEXT(", )")));
+		});
+	});
+
+	Describe("type=hlsl fallback shows all inputs", [this]()
+	{
+		It("fallback emits null for unconnected inputs and var refs for connected", [this]()
+		{
+			if (!TestNotNull("inspect tool found", InspectTool)) return;
+
+			UMaterial* Mat = Helper.CreateTransientMaterial(TEXT("TestMat_HlslFallbackInputs"));
+			if (!TestNotNull("material created", Mat)) return;
+
+			auto* ConstExpr = Cast<UMaterialExpressionConstant>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionConstant::StaticClass()));
+			if (!TestNotNull("constant", ConstExpr)) return;
+			ConstExpr->R = 3.0f;
+
+			auto* Sphere = Cast<UMaterialExpressionSphereMask>(
+				Helper.AddMaterialExpression(Mat, UMaterialExpressionSphereMask::StaticClass()));
+			if (!TestNotNull("sphere mask", Sphere)) return;
+
+			// Wire constant to SphereMask input 0 (A)
+			Sphere->A.Expression = ConstExpr;
+			Sphere->A.OutputIndex = 0;
+
+			// Connect SphereMask to BaseColor
+			FExpressionInput* BaseColorInput = Mat->GetExpressionInputForProperty(MP_BaseColor);
+			if (!TestNotNull("BaseColor input", BaseColorInput)) return;
+			BaseColorInput->Expression = Sphere;
+
+			FMCPToolResult Result = InspectTool->Execute(
+				FMCPToolDirectTestHelper::MakeParams({
+					{ TEXT("target"), FMCPToolDirectTestHelper::GetAssetPath(Mat) },
+					{ TEXT("type"), TEXT("hlsl") }
+				})
+			);
+
+			TestFalse("not error", Result.bIsError);
+
+			// Verify fallback handler emits SphereMask(...)
+			TestTrue("contains SphereMask class name",
+				Result.Content.Contains(TEXT("SphereMask(")));
+
+			// Verify connected input has var ref
+			FString ConstVarName = FString::Printf(TEXT("Constant_%s"),
+				*FMCPJsonHelpers::GuidToCompact(ConstExpr->MaterialExpressionGuid));
+			TestTrue("contains constant var reference",
+				Result.Content.Contains(ConstVarName));
+
+			// Verify unconnected inputs emit null
+			TestTrue("contains null for unconnected inputs",
+				Result.Content.Contains(TEXT("null")));
+
+			// Verify pin name A appears
+			TestTrue("A pin name shown",
+				Result.Content.Contains(TEXT("A:")));
 		});
 	});
 }

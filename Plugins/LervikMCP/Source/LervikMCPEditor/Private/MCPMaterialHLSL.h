@@ -9,6 +9,7 @@
 #include "Materials/MaterialExpressionScalarParameter.h"
 #include "Materials/MaterialExpressionVectorParameter.h"
 #include "Materials/MaterialExpressionStaticBoolParameter.h"
+#include "Materials/MaterialExpressionStaticSwitchParameter.h"
 #include "Materials/MaterialExpressionTextureSample.h"
 #include "Materials/MaterialExpressionTextureSampleParameter2D.h"
 #include "Materials/MaterialExpressionTextureCoordinate.h"
@@ -48,6 +49,8 @@
 #include "Materials/MaterialExpressionParameter.h"
 #include "Materials/MaterialExpressionTextureSampleParameter.h"
 #include "MaterialShaderType.h"
+#include "Materials/MaterialExpressionNamedReroute.h"
+#include "Materials/MaterialExpressionReroute.h"
 #include "MCPGraphHelpers.h"
 #include "MCPJsonHelpers.h"
 
@@ -63,7 +66,8 @@ struct FMCPMaterialHLSL
 		Out += FString::Printf(TEXT("// Material: %s\n"), *Material->GetName());
 		FString ShadingStr = GetShadingModelFieldString(Material->GetShadingModels());
 		FString BlendStr = GetBlendModeString(Material->GetBlendMode());
-		Out += FString::Printf(TEXT("// Shading Model: %s | Blend Mode: %s\n\n"), *ShadingStr, *BlendStr);
+		Out += FString::Printf(TEXT("// Shading Model: %s | Blend Mode: %s\n"), *ShadingStr, *BlendStr);
+		Out += TEXT("// [<ID>] (<pos_x>,<pos_y>) \u2014 each expression has a compact ID and node position\n\n");
 
 		// Collect reachable expressions from all connected material property inputs
 		TSet<UMaterialExpression*> Reachable;
@@ -93,14 +97,10 @@ struct FMCPMaterialHLSL
 			}
 		}
 
-		// Build variable name map
-		TMap<UMaterialExpression*, FString> VarNames;
-		for (UMaterialExpression* Expr : Sorted)
-		{
-			VarNames.Add(Expr, BuildVarName(Expr));
-		}
+		// Build variable name map with collision resolution
+		TMap<UMaterialExpression*, FString> VarNames = BuildVarNameMap(Sorted);
 
-		// Separate parameters from expressions
+		// Separate parameters and expressions
 		TArray<UMaterialExpression*> Params;
 		TArray<UMaterialExpression*> Exprs;
 		for (UMaterialExpression* Expr : Sorted)
@@ -121,6 +121,52 @@ struct FMCPMaterialHLSL
 				Out += TEXT("\n");
 			}
 			Out += TEXT("\n");
+		}
+
+		// Emit dangling (unconnected) expressions
+		TArray<UMaterialExpression*> DanglingExprs;
+		for (UMaterialExpression* Expr : Material->GetExpressions())
+		{
+			if (Expr && !Reachable.Contains(Expr))
+				DanglingExprs.Add(Expr);
+		}
+
+		if (DanglingExprs.Num() > 0)
+		{
+			TSet<UMaterialExpression*> DanglingSet(DanglingExprs);
+
+			TArray<UMaterialExpression*> DanglingSorted;
+			{
+				TSet<UMaterialExpression*> DanglingVisited;
+				for (UMaterialExpression* Expr : DanglingExprs)
+					TopoSort(Expr, DanglingVisited, DanglingSorted, DanglingSet);
+			}
+
+			TMap<UMaterialExpression*, FString> DanglingVarNames = BuildVarNameMap(DanglingSorted);
+
+			// Merge connected VarNames so dangling nodes can reference connected expressions
+			DanglingVarNames.Append(VarNames);
+
+			TArray<UMaterialExpression*> DanglingParams, DanglingNonParams;
+			for (UMaterialExpression* Expr : DanglingSorted)
+			{
+				if (IsParameter(Expr))
+					DanglingParams.Add(Expr);
+				else
+					DanglingNonParams.Add(Expr);
+			}
+
+			Out += TEXT("\n// --- Dangling (unconnected) ---\n");
+			for (UMaterialExpression* Expr : DanglingParams)
+			{
+				Out += EmitExpression(Expr, DanglingVarNames);
+				Out += TEXT("\n");
+			}
+			for (UMaterialExpression* Expr : DanglingNonParams)
+			{
+				Out += EmitExpression(Expr, DanglingVarNames);
+				Out += TEXT("\n");
+			}
 		}
 
 		// Emit expressions
@@ -147,54 +193,6 @@ struct FMCPMaterialHLSL
 					FString Ref = VN ? *VN : TEXT("???");
 					Out += FString::Printf(TEXT("%s = %s;\n"), Entry.Name, *Ref);
 				}
-			}
-		}
-
-		// Emit dangling (unconnected) expressions
-		TArray<UMaterialExpression*> DanglingExprs;
-		for (UMaterialExpression* Expr : Material->GetExpressions())
-		{
-			if (Expr && !Reachable.Contains(Expr))
-				DanglingExprs.Add(Expr);
-		}
-
-		if (DanglingExprs.Num() > 0)
-		{
-			TSet<UMaterialExpression*> DanglingSet(DanglingExprs);
-
-			TArray<UMaterialExpression*> DanglingSorted;
-			{
-				TSet<UMaterialExpression*> DanglingVisited;
-				for (UMaterialExpression* Expr : DanglingExprs)
-					TopoSort(Expr, DanglingVisited, DanglingSorted, DanglingSet);
-			}
-
-			TMap<UMaterialExpression*, FString> DanglingVarNames;
-			for (UMaterialExpression* Expr : DanglingSorted)
-				DanglingVarNames.Add(Expr, BuildVarName(Expr));
-
-			// Merge connected VarNames so dangling nodes can reference connected expressions
-			DanglingVarNames.Append(VarNames);
-
-			TArray<UMaterialExpression*> DanglingParams, DanglingNonParams;
-			for (UMaterialExpression* Expr : DanglingSorted)
-			{
-				if (IsParameter(Expr))
-					DanglingParams.Add(Expr);
-				else
-					DanglingNonParams.Add(Expr);
-			}
-
-			Out += TEXT("\n// --- Dangling (unconnected) ---\n");
-			for (UMaterialExpression* Expr : DanglingParams)
-			{
-				Out += EmitExpression(Expr, DanglingVarNames);
-				Out += TEXT("\n");
-			}
-			for (UMaterialExpression* Expr : DanglingNonParams)
-			{
-				Out += EmitExpression(Expr, DanglingVarNames);
-				Out += TEXT("\n");
 			}
 		}
 
@@ -227,6 +225,11 @@ private:
 					CollectReachable(FI.Input.Expression, Visited);
 			}
 		}
+
+		// NamedRerouteUsage links to its Declaration via pointer, not a standard FExpressionInput
+		if (auto* Usage = Cast<UMaterialExpressionNamedRerouteUsage>(Expr))
+			if (Usage->Declaration)
+				CollectReachable(Usage->Declaration, Visited);
 	}
 
 	static void TopoSort(UMaterialExpression* Expr, TSet<UMaterialExpression*>& Visited,
@@ -252,6 +255,11 @@ private:
 			}
 		}
 
+		// NamedRerouteUsage: ensure Declaration is sorted before this Usage
+		if (auto* Usage = Cast<UMaterialExpressionNamedRerouteUsage>(Expr))
+			if (Usage->Declaration)
+				TopoSort(Usage->Declaration, Visited, Sorted, Reachable);
+
 		Sorted.Add(Expr);
 	}
 
@@ -261,30 +269,90 @@ private:
 	{
 		FString Result;
 		Result.Reserve(Name.Len());
+		bool bLastWasUnderscore = true; // true to skip leading underscores
 		for (TCHAR Ch : Name)
 		{
 			if (FChar::IsAlnum(Ch))
+			{
 				Result.AppendChar(Ch);
-			else
+				bLastWasUnderscore = false;
+			}
+			else if (!bLastWasUnderscore)
+			{
 				Result.AppendChar(TEXT('_'));
+				bLastWasUnderscore = true;
+			}
 		}
-		// Collapse consecutive underscores
-		while (Result.Contains(TEXT("__")))
-			Result = Result.Replace(TEXT("__"), TEXT("_"));
-		Result.TrimStartAndEndInline();
-		// Strip leading/trailing underscores
-		while (Result.Len() > 0 && Result[0] == TEXT('_'))
-			Result.RemoveAt(0);
-		while (Result.Len() > 0 && Result[Result.Len() - 1] == TEXT('_'))
-			Result.RemoveAt(Result.Len() - 1);
+		// Strip trailing underscore
+		if (Result.Len() > 0 && Result[Result.Len() - 1] == TEXT('_'))
+			Result.LeftChopInline(1);
 		if (Result.IsEmpty()) Result = TEXT("Unnamed");
 		return Result;
 	}
 
+	static TMap<UMaterialExpression*, FString> BuildVarNameMap(const TArray<UMaterialExpression*>& Sorted)
+	{
+		TMap<UMaterialExpression*, FString> VarNames;
+		TMap<FString, TArray<UMaterialExpression*>> NameToExprs;
+		for (UMaterialExpression* Expr : Sorted)
+		{
+			FString Name = BuildVarName(Expr);
+			VarNames.Add(Expr, Name);
+			NameToExprs.FindOrAdd(Name).Add(Expr);
+		}
+		for (auto& Pair : NameToExprs)
+		{
+			if (Pair.Value.Num() > 1)
+			{
+				for (UMaterialExpression* Expr : Pair.Value)
+				{
+					FString CompactGuid = FMCPJsonHelpers::GuidToCompact(Expr->MaterialExpressionGuid);
+					VarNames[Expr] = FString::Printf(TEXT("%s_%s"), *Pair.Key, *CompactGuid);
+				}
+			}
+		}
+
+		// Second pass: resolve any remaining collisions with numeric suffixes
+		// Sort collision groups by topo index for deterministic suffix assignment
+		TMap<FString, TArray<UMaterialExpression*>> NameToExprs2;
+		for (auto& Pair : VarNames)
+		{
+			NameToExprs2.FindOrAdd(Pair.Value).Add(Pair.Key);
+		}
+		for (auto& Pair : NameToExprs2)
+		{
+			if (Pair.Value.Num() > 1)
+			{
+				Pair.Value.Sort([&Sorted](UMaterialExpression& A, UMaterialExpression& B)
+				{
+					return Sorted.IndexOfByKey(&A) < Sorted.IndexOfByKey(&B);
+				});
+				int32 Suffix = 0;
+				for (UMaterialExpression* Expr : Pair.Value)
+				{
+					VarNames[Expr] = FString::Printf(TEXT("%s_%d"), *Pair.Key, Suffix++);
+				}
+			}
+		}
+
+		return VarNames;
+	}
+
+	static bool IsStaticSwitchParameter(UMaterialExpression* Expr)
+	{
+		return Cast<UMaterialExpressionStaticSwitchParameter>(Expr) != nullptr;
+	}
+
 	static bool IsParameter(UMaterialExpression* Expr)
 	{
+		if (IsStaticSwitchParameter(Expr)) return false;
 		return Cast<UMaterialExpressionParameter>(Expr) != nullptr
 			|| Cast<UMaterialExpressionTextureSampleParameter>(Expr) != nullptr;
+	}
+
+	static bool HasParameterName(UMaterialExpression* Expr)
+	{
+		return IsParameter(Expr) || IsStaticSwitchParameter(Expr);
 	}
 
 	static FString GetParameterName(UMaterialExpression* Expr)
@@ -298,10 +366,19 @@ private:
 
 	static FString BuildVarName(UMaterialExpression* Expr)
 	{
+		if (auto* SSP = Cast<UMaterialExpressionStaticSwitchParameter>(Expr))
+			return FString::Printf(TEXT("Switch_%s"), *SanitizeName(SSP->ParameterName.ToString()));
 		if (IsParameter(Expr))
 		{
 			FString PName = GetParameterName(Expr);
 			return FString::Printf(TEXT("Param_%s"), *SanitizeName(PName));
+		}
+		if (auto* Decl = Cast<UMaterialExpressionNamedRerouteDeclaration>(Expr))
+			return FString::Printf(TEXT("Reroute_%s"), *SanitizeName(Decl->Name.ToString()));
+		if (Cast<UMaterialExpressionReroute>(Expr))
+		{
+			FString CompactGuid = FMCPJsonHelpers::GuidToCompact(Expr->MaterialExpressionGuid);
+			return FString::Printf(TEXT("Wire_%s"), *CompactGuid);
 		}
 		FString ClassName = CompactClassName(Expr);
 		FString CompactGuid = FMCPJsonHelpers::GuidToCompact(Expr->MaterialExpressionGuid);
@@ -323,7 +400,7 @@ private:
 		int32 X = Expr->MaterialExpressionEditorX;
 		int32 Y = Expr->MaterialExpressionEditorY;
 		FString Desc = Expr->Desc;
-		if (IsParameter(Expr))
+		if (HasParameterName(Expr))
 			Desc = GetParameterName(Expr);
 
 		if (Desc.IsEmpty())
@@ -332,6 +409,33 @@ private:
 	}
 
 	// ── Input reference helpers ────────────────────────────────────────
+
+	static FString GetInputPinName(UMaterialExpression* Expr, int32 InputIndex)
+	{
+		FName PinName = Expr->GetInputName(InputIndex);
+		if (PinName.IsNone()) return FString();
+		FString Name = PinName.ToString();
+		int32 ParenIdx;
+		if (Name.FindChar(TEXT('('), ParenIdx))
+			Name = Name.Left(ParenIdx).TrimEnd();
+		return Name;
+	}
+
+	static FString BuildInputList(UMaterialExpression* Expr,
+		const TMap<UMaterialExpression*, FString>& VarNames, const FString& DefaultValue = TEXT("null"))
+	{
+		FString InputList;
+		int32 Count = FMCPGraphHelpers::GetExpressionInputCount(Expr);
+		for (int32 i = 0; i < Count; ++i)
+		{
+			if (i > 0) InputList += TEXT(", ");
+			FString PinName = GetInputPinName(Expr, i);
+			if (!PinName.IsEmpty())
+				InputList += PinName + TEXT(": ");
+			InputList += InputRef(Expr, i, VarNames, DefaultValue);
+		}
+		return InputList;
+	}
 
 	static FString InputRef(UMaterialExpression* Expr, int32 InputIndex,
 		const TMap<UMaterialExpression*, FString>& VarNames, const FString& DefaultValue = TEXT("0"))
@@ -399,6 +503,14 @@ private:
 
 		if (auto* VP = Cast<UMaterialExpressionVectorParameter>(Expr))
 			return FString::Printf(TEXT("float4 %s = %s; %s"), *VN, *FmtColor(VP->DefaultValue, 4), *Comment);
+
+		if (auto* SSP = Cast<UMaterialExpressionStaticSwitchParameter>(Expr))
+		{
+			FString TrueVal = InputRef(Expr, 0, VarNames, TEXT("0"));
+			FString FalseVal = InputRef(Expr, 1, VarNames, TEXT("0"));
+			return FString::Printf(TEXT("auto %s = %s ? %s : %s; %s"), *VN,
+				SSP->DefaultValue ? TEXT("true") : TEXT("false"), *TrueVal, *FalseVal, *Comment);
+		}
 
 		if (auto* SBP = Cast<UMaterialExpressionStaticBoolParameter>(Expr))
 			return FString::Printf(TEXT("bool %s = %s; %s"), *VN, SBP->DefaultValue ? TEXT("true") : TEXT("false"), *Comment);
@@ -547,13 +659,7 @@ private:
 		// ── Custom ──
 		if (auto* Custom = Cast<UMaterialExpressionCustom>(Expr))
 		{
-			FString InputList;
-			int32 Count = FMCPGraphHelpers::GetExpressionInputCount(Expr);
-			for (int32 i = 0; i < Count; ++i)
-			{
-				if (i > 0) InputList += TEXT(", ");
-				InputList += InputRef(Expr, i, VarNames);
-			}
+			FString InputList = BuildInputList(Expr, VarNames, TEXT("0"));
 			FString Desc = Custom->Description.IsEmpty() ? TEXT("Custom") : Custom->Description;
 			// Show the code inline (first line only if multiline, to keep compact)
 			FString CodePreview = Custom->Code.Replace(TEXT("\n"), TEXT(" ")).Left(120);
@@ -566,15 +672,41 @@ private:
 		{
 			FString FuncName = FuncCall->MaterialFunction
 				? FuncCall->MaterialFunction->GetName() : TEXT("Unknown");
-			FString InputList;
-			int32 Count = FMCPGraphHelpers::GetExpressionInputCount(Expr);
-			for (int32 i = 0; i < Count; ++i)
-			{
-				if (i > 0) InputList += TEXT(", ");
-				InputList += InputRef(Expr, i, VarNames);
-			}
+			FString InputList = BuildInputList(Expr, VarNames);
+			if (InputList.IsEmpty())
+				return FString::Printf(TEXT("auto %s = FunctionCall(\"%s\"); %s"),
+					*VN, *FuncName, *Comment);
 			return FString::Printf(TEXT("auto %s = FunctionCall(\"%s\", %s); %s"),
 				*VN, *FuncName, *InputList, *Comment);
+		}
+
+		// ── Plain Reroute (passthrough wire) ──
+		if (Cast<UMaterialExpressionReroute>(Expr))
+		{
+			FString Input = InputRef(Expr, 0, VarNames, TEXT("null"));
+			return FString::Printf(TEXT("auto %s = %s; %s"), *VN, *Input, *Comment);
+		}
+
+		// ── Named Reroute ──
+		if (auto* Decl = Cast<UMaterialExpressionNamedRerouteDeclaration>(Expr))
+		{
+			FString Input = InputRef(Expr, 0, VarNames, TEXT("0"));
+			return FString::Printf(TEXT("auto %s = %s; %s | decl: \"%s\""),
+				*VN, *Input, *Comment, *Decl->Name.ToString());
+		}
+
+		if (auto* Usage = Cast<UMaterialExpressionNamedRerouteUsage>(Expr))
+		{
+			FString DeclRef = TEXT("???");
+			FString RerouteName;
+			if (Usage->Declaration)
+			{
+				const FString* DeclVN = VarNames.Find(Usage->Declaration);
+				DeclRef = DeclVN ? *DeclVN : TEXT("???");
+				RerouteName = Usage->Declaration->Name.ToString();
+			}
+			return FString::Printf(TEXT("auto %s = %s; %s | reroute: \"%s\""),
+				*VN, *DeclRef, *Comment, *RerouteName);
 		}
 
 		// ── Fallback ──
@@ -625,17 +757,7 @@ private:
 		const FString& Comment, const TMap<UMaterialExpression*, FString>& VarNames)
 	{
 		FString ClassName = CompactClassName(Expr);
-		FString InputList;
-		int32 Count = FMCPGraphHelpers::GetExpressionInputCount(Expr);
-		for (int32 i = 0; i < Count; ++i)
-		{
-			FExpressionInput* Input = FMCPGraphHelpers::GetExpressionInput(Expr, i);
-			if (Input && Input->Expression)
-			{
-				if (InputList.Len() > 0) InputList += TEXT(", ");
-				InputList += InputRef(Expr, i, VarNames);
-			}
-		}
+		FString InputList = BuildInputList(Expr, VarNames);
 		return FString::Printf(TEXT("auto %s = %s(%s); %s"), *VN, *ClassName, *InputList, *Comment);
 	}
 };
